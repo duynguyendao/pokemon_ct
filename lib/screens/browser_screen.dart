@@ -66,6 +66,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
             await _controller.runJavaScript(buildAntiFingerprintScript(_profile));
           }
 
+          // Auto-fill login page
+          if (url.contains('login') || _currentUrl.contains('pokemoncenter')) {
+            await Future.delayed(const Duration(milliseconds: 300));
+            await _autoFill();
+          }
+
           // Check OTP field
           await _controller.runJavaScript('''
 (function() {
@@ -105,7 +111,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     } catch (_) {}
   }
 
-  Future<void> _autoFill() async {
+  Future<void> _autoFill({bool silent = false}) async {
     setState(() {
       _autoFilling = true;
       _statusText = '📧 Điền email...';
@@ -113,7 +119,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     try {
       // Wait for page to be ready
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 300));
 
       // Inject and execute auto-fill
       await _controller.runJavaScript(
@@ -121,36 +127,48 @@ class _BrowserScreenState extends State<BrowserScreen> {
       );
 
       setState(() => _statusText = '✅ Email + Password');
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 600));
 
-      // Try to find and click login button
+      // Try to find and click login button (ログイン, 送信, login, sign in)
       await _controller.runJavaScript('''
 (function() {
-  const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]'));
-  const loginBtn = buttons.find(b => b.textContent.toLowerCase().includes('login') ||
-                                       b.textContent.toLowerCase().includes('送信') ||
-                                       b.textContent.toLowerCase().includes('signin'));
+  // Find login button by text content
+  const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"], div[role="button"]'));
+  let loginBtn = null;
+
+  for (const btn of buttons) {
+    const text = btn.textContent || btn.value || '';
+    if (text.includes('ログイン') || text.includes('送信') ||
+        text.toLowerCase().includes('login') || text.toLowerCase().includes('sign in')) {
+      loginBtn = btn;
+      break;
+    }
+  }
+
   if (loginBtn) {
     loginBtn.click();
+    console.log('Clicked login button');
   }
 })();
 ''');
 
       setState(() => _statusText = '🔐 ログイン中...');
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(seconds: 2));
 
       if (mounted) {
         setState(() => _statusText = '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Điền xong - Chờ OTP'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        if (!silent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Điền xong - Chờ OTP'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _statusText = '⚠️ Lỗi: Không tìm được form');
+        setState(() => _statusText = '⚠️ Lỗi: ${e.toString().substring(0, 30)}');
         await Future.delayed(const Duration(seconds: 2));
         setState(() => _statusText = '');
       }

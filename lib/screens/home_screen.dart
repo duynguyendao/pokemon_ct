@@ -79,14 +79,51 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openAccount(Account account, AppProvider p) {
-    final proxy = p.proxyEnabled ? p.getProxyById(account.proxyId) ?? p.nextProxy : null;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BrowserScreen(account: account, proxy: proxy),
-      ),
-    );
+  Future<void> _openAccount(Account account, AppProvider p) async {
+    // Show loading dialog while 5G shortcut runs
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          backgroundColor: AppColors.card,
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(color: AppColors.accent),
+              ),
+              SizedBox(height: 16),
+              Text('⚡ Chạy 5G Shortcut...',
+                  style: TextStyle(color: Colors.white)),
+              SizedBox(height: 8),
+              Text('Chờ IP thay đổi',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Trigger 5G shortcut
+    await ShortcutService.triggerShortcut('5G');
+
+    // Wait for IP change
+    await Future.delayed(const Duration(seconds: 5));
+
+    if (mounted) {
+      Navigator.pop(context); // Close loading dialog
+
+      final proxy = p.proxyEnabled ? p.getProxyById(account.proxyId) ?? p.nextProxy : null;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BrowserScreen(account: account, proxy: proxy),
+        ),
+      );
+    }
   }
 
   void _showEditDialog(BuildContext ctx, Account account, AppProvider p) {
