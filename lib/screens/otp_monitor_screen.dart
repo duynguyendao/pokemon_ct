@@ -64,13 +64,24 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   Future<void> _testConnection(AppProvider p) async {
     await _saveConfig(p);
     setState(() => _testing = true);
-    final ok = await p.testImapConnection();
-    setState(() => _testing = false);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok ? 'Kết nối thành công!' : 'Kết nối thất bại!'),
-        backgroundColor: ok ? AppColors.done : AppColors.error,
-      ));
+    try {
+      final ok = await p.testImapConnection();
+      setState(() => _testing = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok ? 'Kết nối thành công!' : 'Kết nối thất bại!\nKiểm tra:\n- Host/Port đúng?\n- Email/Password đúng?\n- Password có space thì để nguyên'),
+          backgroundColor: ok ? AppColors.done : AppColors.error,
+          duration: const Duration(seconds: 4),
+        ));
+      }
+    } catch (e) {
+      setState(() => _testing = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Lỗi: $e'),
+          backgroundColor: AppColors.error,
+        ));
+      }
     }
   }
 

@@ -241,6 +241,44 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
               activeThumbColor: AppColors.secondary,
             ),
+            ListTile(
+              title: const Text('Bật 5G/WiFi', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Cần tạo Shortcut trong iOS Shortcuts app',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              trailing: ElevatedButton.icon(
+                icon: const Icon(Icons.settings_remote, size: 16),
+                label: const Text('Hướng dẫn', style: TextStyle(fontSize: 11)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.accent,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: Size.zero,
+                ),
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      backgroundColor: AppColors.card,
+                      title: const Text('Tạo Shortcut 5G', style: TextStyle(color: Colors.white)),
+                      content: const Text(
+                        '1. Mở iOS Shortcuts app\n'
+                        '2. Tạo Shortcut mới\n'
+                        '3. Thêm action: "Ask for [Number/Text]"\n'
+                        '4. Thêm action: "Control WiFi" hoặc "Control Cellular"\n'
+                        '5. Share → Add to Home Screen\n\n'
+                        'Sau đó nhấn nút Shortcut từ app PokemonCT',
+                        style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                      ),
+                      actions: [
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
             const SizedBox(height: 8),
             TextField(
               controller: pwCtrl,
@@ -276,21 +314,30 @@ class _HomeScreenState extends State<HomeScreen> {
             ? TextField(
                 controller: _searchCtrl,
                 autofocus: true,
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: Colors.white, fontSize: 16),
                 decoration: const InputDecoration(
                   hintText: 'Tìm email...',
                   hintStyle: TextStyle(color: AppColors.textSecondary),
                   border: InputBorder.none,
                   filled: false,
+                  isDense: true,
                 ),
                 onChanged: (v) => setState(() => _searchQuery = v),
               )
             : Row(
                 children: [
-                  const Text('🎮', style: TextStyle(fontSize: 20)),
-                  const SizedBox(width: 8),
-                  const Text('PokemonCT',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  const Text('⚡', style: TextStyle(fontSize: 22)),
+                  const SizedBox(width: 10),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('PokemonCT',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 0.5)),
+                      Text('Account Manager',
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                    ],
+                  ),
                 ],
               ),
         actions: [
@@ -334,16 +381,16 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           // Summary Row
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
               children: [
-                Expanded(child: SummaryCard(label: 'Chờ', value: p.todoCount, color: AppColors.todo)),
-                const SizedBox(width: 8),
-                Expanded(child: SummaryCard(label: 'Xong', value: p.doneCount, color: AppColors.done)),
-                const SizedBox(width: 8),
-                Expanded(child: SummaryCard(label: 'Tổng', value: p.accounts.length, color: AppColors.primary)),
-                const SizedBox(width: 8),
-                Expanded(child: SummaryCard(label: 'Proxy', value: p.proxies.length, color: AppColors.warning)),
+                Expanded(child: SummaryCard(label: '⏳ Chờ', value: p.todoCount, color: AppColors.todo)),
+                const SizedBox(width: 10),
+                Expanded(child: SummaryCard(label: '✅ Xong', value: p.doneCount, color: AppColors.done)),
+                const SizedBox(width: 10),
+                Expanded(child: SummaryCard(label: '📊 Tổng', value: p.accounts.length, color: AppColors.primary)),
+                const SizedBox(width: 10),
+                Expanded(child: SummaryCard(label: '🔐 Proxy', value: p.proxies.length, color: AppColors.accent)),
               ],
             ),
           ),

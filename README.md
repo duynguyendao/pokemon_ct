@@ -1,17 +1,51 @@
-# pokemon_ct
+# PokemonCT - Account Manager for iOS
 
-A new Flutter project.
+Fast account management tool cho Pokemon Center với anti-fingerprint browser, OTP monitor, và proxy management.
 
-## Getting Started
+## 🚀 Chạy App
 
-This project is a starting point for a Flutter application.
+### Yêu cầu
+- macOS + Xcode (để build cho iPhone)
+- Flutter SDK 3.11+
+- iOS 12.0+
 
-A few resources to get you started if this is your first Flutter project:
+### Build & Run
+```bash
+cd pokemon_ct
+flutter pub get
+flutter run -d <device-id>
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## 🔧 Cấu hình IMAP (OTP Monitor)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### Gmail (khuyên dùng)
+1. **Bật 2-Factor**: myaccount.google.com → Security
+2. **App Password**: 
+   - Security → App passwords
+   - Chọn Mail & iOS
+   - Copy password (có spaces)
+   - Dán vào app, **KHÔNG cần xóa spaces**
+
+3. **Cài trong app**:
+   - Host: `imap.gmail.com`
+   - Port: `993`
+   - Email: `your@gmail.com`
+   - Password: `abcd efgh ijkl mnop` (paste nguyên)
+
+## 📋 Hướng dẫn
+
+**Tab 1 - Tài Khoản**: Import batch, search, filter
+**Tab 2 - OTP**: Setup IMAP, monitor OTP tự động
+**Tab 3 - Proxy**: Add, enable/disable, copy
+
+**Browser**: Anti-fingerprint JS, auto-fill, auto OTP
+
+## 🎯 Features
+✅ Batch import | Anti-fingerprint | IMAP OTP | Proxy manager | Dark theme | Groups | Swipe-to-delete
+
+## 📝 Notes
+- Data lưu local
+- iOS 12.0+ support
+- No ads, no tracking
+
+Made with Flutter 💙

@@ -28,7 +28,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _otpOverlayVisible = false;
   String? _latestOtp;
 
-  static const _startUrl = 'https://www.pokemon-card.com/';
+  static const _startUrl = 'https://www.pokemoncenter-online.com/login/';
 
   @override
   void initState() {

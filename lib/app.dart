@@ -50,15 +50,26 @@ class _MainShellState extends State<_MainShell> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('🎮', style: TextStyle(fontSize: 64)),
-              SizedBox(height: 16),
+              Text('⚡', style: TextStyle(fontSize: 80)),
+              SizedBox(height: 20),
               Text('PokemonCT',
                   style: TextStyle(
                       color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold)),
-              SizedBox(height: 24),
-              CircularProgressIndicator(color: AppColors.primary),
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2)),
+              SizedBox(height: 8),
+              Text('Account Manager',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12, letterSpacing: 0.5)),
+              SizedBox(height: 32),
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(
+                  color: AppColors.primary,
+                  strokeWidth: 3,
+                ),
+              ),
             ],
           ),
         ),
