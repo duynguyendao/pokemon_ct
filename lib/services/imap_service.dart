@@ -1,7 +1,14 @@
 import 'dart:async';
 import 'package:enough_mail/enough_mail.dart';
+import 'package:flutter/foundation.dart';
 import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
+
+void _log(String tag, String msg) {
+  if (kDebugMode) {
+    print('[IMAP:$tag] $msg');
+  }
+}
 
 class ImapConfig {
   final String host;
@@ -73,10 +80,19 @@ class ImapService {
 
   Future<void> _connect() async {
     final config = _config!;
+    _log('CONNECT', 'Connecting to ${config.host}:${config.port}...');
     _client = ImapClient(isLogEnabled: false);
-    await _client!.connectToServer(config.host, config.port, isSecure: config.isSecure);
-    await _client!.login(config.username, config.password);
-    await _client!.selectInbox();
+    try {
+      await _client!.connectToServer(config.host, config.port, isSecure: config.isSecure);
+      _log('CONNECT', 'Connected ✓');
+      await _client!.login(config.username, config.password);
+      _log('CONNECT', 'Logged in ✓');
+      await _client!.selectInbox();
+      _log('CONNECT', 'Inbox selected ✓');
+    } catch (e) {
+      _log('CONNECT', 'Error: $e');
+      rethrow;
+    }
   }
 
   Future<List<OtpEntry>> fetchNow() async {
@@ -96,14 +112,17 @@ class ImapService {
 
       final mailbox = await _client!.selectInbox();
       final count = mailbox.messagesExists;
+      _log('POLL', 'Messages in inbox: $count');
       if (count == 0) return results;
 
       // Fetch last 20 messages
       final start = (count > 20 ? count - 19 : 1);
       final sequence = MessageSequence.fromRange(start, count);
+      _log('POLL', 'Fetching sequence $start-$count...');
 
       // Fetch with simple request
       final fetchResult = await _client!.fetchMessages(sequence, 'ENVELOPE BODY[]');
+      _log('POLL', 'Fetched ${fetchResult.messages.length} messages');
 
       final cutoff = DateTime.now().subtract(const Duration(hours: 1));
       for (final msg in fetchResult.messages) {
@@ -113,10 +132,12 @@ class ImapService {
         final entry = _extractOtp(msg);
         if (entry != null && !_otpController.isClosed) {
           results.add(entry);
+          _log('POLL', 'OTP found: ${entry.code}');
           _otpController.add(entry);
         }
       }
     } catch (e) {
+      _log('POLL', 'Error: $e');
       // Silently handle errors, disconnect to retry next poll
       _client = null;
     }
@@ -132,19 +153,28 @@ class ImapService {
     int maxMessages = 20,
   }) async {
     final results = <EmailSearchResult>[];
-    final client = ImapClient(isLogEnabled: false);
+    final client = ImapClient(isLogEnabled: true);
+    _log('SEARCH', 'Starting email search...');
+    _log('SEARCH', 'Keyword: $subjectKeyword, From: $from, To: $to, Max: $maxMessages');
     try {
+      _log('SEARCH', 'Connecting to ${config.host}:${config.port}...');
       await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
+      _log('SEARCH', 'Connected ✓');
       await client.login(config.username, config.password);
+      _log('SEARCH', 'Logged in ✓');
       final mailbox = await client.selectInbox();
+      _log('SEARCH', 'Inbox selected ✓');
       final count = mailbox.messagesExists;
+      _log('SEARCH', 'Total messages: $count');
       if (count == 0) return results;
 
       // Fetch last N messages
       final fetchCount = count < maxMessages ? count : maxMessages;
       final startSeq = count - fetchCount + 1;
       final sequence = MessageSequence.fromRange(startSeq, count);
+      _log('SEARCH', 'Fetching sequence $startSeq-$count (total: $fetchCount messages)...');
       final fetchResult = await client.fetchMessages(sequence, 'ENVELOPE BODY[]');
+      _log('SEARCH', 'Successfully fetched ${fetchResult.messages.length} messages');
 
       final fromDate = from ?? DateTime.now().subtract(const Duration(hours: 24));
       final toDate = to ?? DateTime.now();
@@ -175,10 +205,17 @@ class ImapService {
           otpFound: otp,
         ));
       }
+      _log('SEARCH', 'Found ${results.length} matching emails');
     } catch (e) {
+      _log('SEARCH', 'ERROR: $e');
       rethrow;
     } finally {
-      try { await client.logout(); } catch (_) {}
+      try {
+        await client.logout();
+        _log('SEARCH', 'Logged out ✓');
+      } catch (e) {
+        _log('SEARCH', 'Logout error: $e');
+      }
     }
     return results;
   }
@@ -247,12 +284,17 @@ class ImapService {
 
   Future<bool> testConnection(ImapConfig config) async {
     final client = ImapClient(isLogEnabled: false);
+    _log('TEST', 'Testing connection to ${config.host}:${config.port}...');
     try {
       await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
+      _log('TEST', 'Connected ✓');
       await client.login(config.username, config.password);
+      _log('TEST', 'Logged in ✓');
       await client.logout();
+      _log('TEST', 'Logged out ✓');
       return true;
-    } catch (_) {
+    } catch (e) {
+      _log('TEST', 'Failed: $e');
       return false;
     }
   }
