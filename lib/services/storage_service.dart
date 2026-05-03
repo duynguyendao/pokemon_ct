@@ -67,7 +67,7 @@ class StorageService {
   Future<Map<String, String>> loadImapConfig() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_imapConfigKey);
-    if (raw == null) return {};
+    if (raw == null) return _defaultImapConfig();
     return Map<String, String>.from(jsonDecode(raw) as Map);
   }
 
@@ -120,4 +120,12 @@ class StorageService {
           enabled: true,
         ),
       ];
+
+  Map<String, String> _defaultImapConfig() => {
+        'host': 'imap.gmail.com',
+        'port': '993',
+        'username': 'duynguyenpk8793@gmail.com',
+        'password': '',
+        'pollInterval': '2',
+      };
 }

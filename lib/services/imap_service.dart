@@ -93,25 +93,31 @@ class ImapService {
     final results = <OtpEntry>[];
     try {
       if (_client == null) await _connect();
+
       final mailbox = await _client!.selectInbox();
       final count = mailbox.messagesExists;
       if (count == 0) return results;
 
-      final start = count > 15 ? count - 14 : 1;
+      // Fetch last 20 messages
+      final start = (count > 20 ? count - 19 : 1);
       final sequence = MessageSequence.fromRange(start, count);
-      final fetchResult = await _client!.fetchMessages(sequence, 'ENVELOPE BODY.PEEK[TEXT]');
 
-      final cutoff = DateTime.now().subtract(const Duration(minutes: 30));
+      // Fetch with simple request
+      final fetchResult = await _client!.fetchMessages(sequence, 'ENVELOPE BODY[]');
+
+      final cutoff = DateTime.now().subtract(const Duration(hours: 1));
       for (final msg in fetchResult.messages) {
         final msgDate = msg.decodeDate();
         if (msgDate != null && msgDate.isBefore(cutoff)) continue;
+
         final entry = _extractOtp(msg);
         if (entry != null && !_otpController.isClosed) {
           results.add(entry);
           _otpController.add(entry);
         }
       }
-    } catch (_) {
+    } catch (e) {
+      // Silently handle errors, disconnect to retry next poll
       _client = null;
     }
     return results;
@@ -138,7 +144,7 @@ class ImapService {
       final fetchCount = count < maxMessages ? count : maxMessages;
       final startSeq = count - fetchCount + 1;
       final sequence = MessageSequence.fromRange(startSeq, count);
-      final fetchResult = await client.fetchMessages(sequence, 'ENVELOPE BODY.PEEK[TEXT]');
+      final fetchResult = await client.fetchMessages(sequence, 'ENVELOPE BODY[]');
 
       final fromDate = from ?? DateTime.now().subtract(const Duration(hours: 24));
       final toDate = to ?? DateTime.now();
