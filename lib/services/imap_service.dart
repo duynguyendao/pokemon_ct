@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'package:enough_mail/enough_mail.dart';
-import 'package:flutter/foundation.dart';
 import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
+import 'debug_service.dart';
 
 void _log(String tag, String msg) {
-  if (kDebugMode) {
-    print('[IMAP:$tag] $msg');
-  }
+  debugService.log('[IMAP:$tag] $msg');
 }
 
 class ImapConfig {

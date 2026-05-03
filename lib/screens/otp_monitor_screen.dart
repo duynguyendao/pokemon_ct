@@ -6,6 +6,7 @@ import '../models/filter_rule.dart';
 import '../models/otp_entry.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
+import '../services/debug_service.dart';
 
 class OtpMonitorScreen extends StatefulWidget {
   const OtpMonitorScreen({super.key});
@@ -44,7 +45,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 3, vsync: this);
+    _tabCtrl = TabController(length: 4, vsync: this);
     _loadConfig();
   }
 
@@ -295,6 +296,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
             Tab(text: 'Cài đặt'),
             Tab(text: 'Tìm email'),
             Tab(text: 'OTP'),
+            Tab(text: 'Debug'),
           ],
         ),
       ),
@@ -304,6 +306,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
           _buildSettingsTab(p),
           _buildSearchTab(p),
           _buildOtpTab(p),
+          _buildDebugTab(),
         ],
       ),
     );
@@ -801,6 +804,96 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
               const SnackBar(content: Text('Đã copy OTP!'), duration: Duration(seconds: 1)),
             );
           },
+        ),
+      ),
+    );
+  }
+
+  // ─── TAB 4: Debug ─────────────────────────────────────────────────────────
+
+  Widget _buildDebugTab() {
+    return ChangeNotifierProvider.value(
+      value: debugService,
+      child: Consumer<DebugService>(
+        builder: (context, debug, _) => Column(
+          children: [
+            // Controls
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${debug.logs.length} log messages',
+                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => debug.clear(),
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: const Text('Clear'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.card,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      minimumSize: Size.zero,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // Logs
+            Expanded(
+              child: debug.logs.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Chưa có log nào',
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                    )
+                  : ListView.builder(
+                      reverse: false,
+                      padding: const EdgeInsets.all(8),
+                      itemCount: debug.logs.length,
+                      itemBuilder: (_, i) {
+                        final log = debug.logs[i];
+                        final isError = log.contains('ERROR') || log.contains('failed') || log.contains('lỗi');
+                        final isSuccess = log.contains('✓') || log.contains('Success') || log.contains('OK');
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: isError
+                                ? AppColors.error.withAlpha(10)
+                                : isSuccess
+                                    ? AppColors.done.withAlpha(10)
+                                    : AppColors.card,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isError
+                                  ? AppColors.error.withAlpha(50)
+                                  : isSuccess
+                                      ? AppColors.done.withAlpha(50)
+                                      : AppColors.divider,
+                            ),
+                          ),
+                          child: SelectableText(
+                            log,
+                            style: TextStyle(
+                              color: isError
+                                  ? AppColors.error
+                                  : isSuccess
+                                      ? AppColors.done
+                                      : Colors.white,
+                              fontSize: 12,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         ),
       ),
     );
