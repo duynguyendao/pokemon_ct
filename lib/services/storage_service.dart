@@ -109,14 +109,14 @@ class StorageService {
   List<FilterRule> _defaultRules() => [
         FilterRule(
           type: FilterType.sender,
-          pattern: 'pokemon-center',
-          extractPattern: r'\b(\d{6})\b',
+          pattern: 'pokemoncenter-online',
+          extractPattern: r'【パスコード】\s*(\d{6})',
           enabled: true,
         ),
         FilterRule(
           type: FilterType.subject,
-          pattern: '認証',
-          extractPattern: r'\b(\d{6})\b',
+          pattern: 'ログイン',
+          extractPattern: r'【パスコード】\s*(\d{6})',
           enabled: true,
         ),
       ];

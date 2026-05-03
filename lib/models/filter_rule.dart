@@ -29,15 +29,34 @@ class FilterRule {
   }
 
   String? extractOtp(String text) {
-    final regexStr = extractPattern?.isNotEmpty == true
-        ? extractPattern!
-        : r'\b(\d{4,8})\b';
-    try {
-      final match = RegExp(regexStr).firstMatch(text);
-      return match?.group(1) ?? match?.group(0);
-    } catch (_) {
-      return null;
+    // Try extract pattern first
+    if (extractPattern?.isNotEmpty == true) {
+      try {
+        final match = RegExp(extractPattern!).firstMatch(text);
+        if (match != null) {
+          return match.group(1) ?? match.group(0);
+        }
+      } catch (_) {}
     }
+
+    // Fallback patterns for common formats
+    final patterns = [
+      r'【パスコード】\s*(\d{6})',  // Japanese: 【パスコード】568661
+      r'(?:パスコード|コード)[:：]\s*(\d{6})',  // Japanese variant
+      r'\b(\d{6})\b',  // 6-digit code
+      r'(?:code|コード|passcode)[\s:：]*(\d{4,8})',  // English/Japanese mixed
+    ];
+
+    for (final pattern in patterns) {
+      try {
+        final match = RegExp(pattern, caseSensitive: false).firstMatch(text);
+        if (match != null) {
+          return match.group(1) ?? match.group(0);
+        }
+      } catch (_) {}
+    }
+
+    return null;
   }
 
   Map<String, dynamic> toJson() => {

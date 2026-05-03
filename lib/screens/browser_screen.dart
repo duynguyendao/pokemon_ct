@@ -22,11 +22,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
   late final WebViewController _controller;
   late final DeviceProfile _profile;
   bool _loading = true;
-  String _currentUrl = 'https://www.pokemon-card.com/';
+  String _currentUrl = 'https://www.pokemoncenter-online.com/login/';
   bool _canGoBack = false;
   bool _canGoForward = false;
   bool _otpOverlayVisible = false;
   String? _latestOtp;
+  String _statusText = '';
+  bool _autoFilling = false;
 
   static const _startUrl = 'https://www.pokemoncenter-online.com/login/';
 
@@ -104,16 +106,56 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _autoFill() async {
-    await _controller.runJavaScript(
-      buildAutoFillScript(widget.account.email, widget.account.password),
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Đã điền thông tin tự động'),
-          duration: Duration(seconds: 2),
-        ),
+    setState(() {
+      _autoFilling = true;
+      _statusText = '📧 Điền email...';
+    });
+
+    try {
+      // Wait for page to be ready
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Inject and execute auto-fill
+      await _controller.runJavaScript(
+        buildAutoFillScript(widget.account.email, widget.account.password),
       );
+
+      setState(() => _statusText = '✅ Email + Password');
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      // Try to find and click login button
+      await _controller.runJavaScript('''
+(function() {
+  const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]'));
+  const loginBtn = buttons.find(b => b.textContent.toLowerCase().includes('login') ||
+                                       b.textContent.toLowerCase().includes('送信') ||
+                                       b.textContent.toLowerCase().includes('signin'));
+  if (loginBtn) {
+    loginBtn.click();
+  }
+})();
+''');
+
+      setState(() => _statusText = '🔐 ログイン中...');
+      await Future.delayed(const Duration(seconds: 1));
+
+      if (mounted) {
+        setState(() => _statusText = '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Điền xong - Chờ OTP'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _statusText = '⚠️ Lỗi: Không tìm được form');
+        await Future.delayed(const Duration(seconds: 2));
+        setState(() => _statusText = '');
+      }
+    } finally {
+      setState(() => _autoFilling = false);
     }
   }
 
@@ -214,6 +256,45 @@ class _BrowserScreenState extends State<BrowserScreen> {
               valueColor: AlwaysStoppedAnimation(AppColors.primary),
             ),
 
+          // Status overlay
+          if (_statusText.isNotEmpty)
+            Positioned(
+              top: 60,
+              left: 16,
+              right: 16,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.secondary),
+                    boxShadow: [BoxShadow(color: Colors.black.withAlpha(100), blurRadius: 8)],
+                  ),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation(AppColors.secondary),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _statusText,
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
           // OTP auto-fill overlay
           if (_otpOverlayVisible && _latestOtp != null)
             Positioned(
@@ -288,11 +369,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 onPressed: () => _controller.reload(),
               ),
               ElevatedButton.icon(
-                onPressed: _autoFill,
-                icon: const Icon(Icons.auto_fix_high, size: 16),
-                label: const Text('Tự điền', style: TextStyle(fontSize: 12)),
+                onPressed: _autoFilling ? null : _autoFill,
+                icon: _autoFilling
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.auto_fix_high, size: 16),
+                label: Text(
+                  _autoFilling ? 'Đang...' : 'Tự điền',
+                  style: const TextStyle(fontSize: 12),
+                ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.secondary,
+                  backgroundColor: _autoFilling ? AppColors.surfaceVariant : AppColors.secondary,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   minimumSize: Size.zero,
                 ),

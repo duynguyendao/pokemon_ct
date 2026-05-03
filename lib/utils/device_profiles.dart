@@ -208,33 +208,98 @@ String buildAntiFingerprintScript(DeviceProfile profile) {
     Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
     Object.defineProperty(window, 'devicePixelRatio', { get: () => ${profile.devicePixelRatio} });
 
-    const origGetParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(param) {
-      if (param === 0x9245) return '${profile.webglVendor}';
-      if (param === 0x9246) return '${profile.webglRenderer}';
-      return origGetParameter.call(this, param);
-    };
+    // WebGL spoofing
+    const glVendor = '${profile.webglVendor}';
+    const glRenderer = '${profile.webglRenderer}';
 
+    try {
+      const origGetParameter = WebGLRenderingContext.prototype.getParameter;
+      WebGLRenderingContext.prototype.getParameter = function(param) {
+        if (param === 37445) return glVendor; // UNMASKED_VENDOR_WEBGL
+        if (param === 37446) return glRenderer; // UNMASKED_RENDERER_WEBGL
+        return origGetParameter.call(this, param);
+      };
+
+      const origGetParameter2 = WebGL2RenderingContext?.prototype?.getParameter;
+      if (origGetParameter2) {
+        WebGL2RenderingContext.prototype.getParameter = function(param) {
+          if (param === 37445) return glVendor;
+          if (param === 37446) return glRenderer;
+          return origGetParameter2.call(this, param);
+        };
+      }
+    } catch(e) {}
+
+    // Network info
     Object.defineProperty(navigator, 'connection', {
-      get: () => ({ effectiveType: '4g', type: 'wifi', downlink: 10, rtt: 50 })
+      get: () => ({
+        effectiveType: '4g',
+        downlink: 10,
+        rtt: 50,
+        saveData: false,
+        type: 'wifi'
+      })
     });
 
-    navigator.getBattery = () => Promise.resolve({
-      charging: true, chargingTime: 0, dischargingTime: Infinity, level: 0.9
+    // Battery status
+    if (!navigator.getBattery) {
+      navigator.getBattery = () => Promise.resolve({
+        charging: true,
+        chargingTime: 0,
+        dischargingTime: Infinity,
+        level: 0.9
+      });
+    }
+
+    // Plugins array
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [
+        {name: 'Chrome PDF Plugin'},
+        {name: 'Chrome PDF Viewer'},
+        {name: 'Native Client Executable'}
+      ]
     });
 
+    // Canvas fingerprinting protection
     const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    HTMLCanvasElement.prototype.toDataURL = function(type) {
+    const origToBlob = HTMLCanvasElement.prototype.toBlob;
+
+    function randomizeCanvas() {
+      const rand = Math.random();
+      return Math.floor(rand * 256);
+    }
+
+    HTMLCanvasElement.prototype.toDataURL = function() {
       const ctx = this.getContext('2d');
-      if (ctx) {
-        const imageData = ctx.getImageData(0, 0, this.width, this.height);
-        for (let i = 0; i < 10; i++) {
-          imageData.data[i * 4] ^= 1;
-        }
-        ctx.putImageData(imageData, 0, 0);
+      if (ctx && this.width > 0 && this.height > 0) {
+        try {
+          const imageData = ctx.getImageData(0, 0, Math.min(this.width, 100), Math.min(this.height, 100));
+          const data = imageData.data;
+          for (let i = 0; i < Math.min(data.length, 100); i += 4) {
+            data[i] = (data[i] + randomizeCanvas()) % 256;
+          }
+          ctx.putImageData(imageData, 0, 0);
+        } catch(e) {}
       }
       return origToDataURL.apply(this, arguments);
     };
+
+    if (origToBlob) {
+      HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
+        const ctx = this.getContext('2d');
+        if (ctx && this.width > 0 && this.height > 0) {
+          try {
+            const imageData = ctx.getImageData(0, 0, Math.min(this.width, 100), Math.min(this.height, 100));
+            const data = imageData.data;
+            for (let i = 0; i < Math.min(data.length, 100); i += 4) {
+              data[i] = (data[i] + randomizeCanvas()) % 256;
+            }
+            ctx.putImageData(imageData, 0, 0);
+          } catch(e) {}
+        }
+        return origToBlob.call(this, callback, type, quality);
+      };
+    }
   } catch(e) {}
 })();
 ''';

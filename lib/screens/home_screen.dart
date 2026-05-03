@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/account.dart';
 import '../providers/app_provider.dart';
+import '../services/shortcut_service.dart';
 import '../utils/app_theme.dart';
 import '../widgets/account_card.dart';
 import '../widgets/summary_card.dart';
@@ -242,40 +243,28 @@ class _HomeScreenState extends State<HomeScreen> {
               activeThumbColor: AppColors.secondary,
             ),
             ListTile(
-              title: const Text('Bật 5G/WiFi', style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Cần tạo Shortcut trong iOS Shortcuts app',
+              title: const Text('Bật 5G/WiFi Shortcut', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Gọi Shortcut: Tắt 5G → Bật 5G → Open App',
                   style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
               trailing: ElevatedButton.icon(
-                icon: const Icon(Icons.settings_remote, size: 16),
-                label: const Text('Hướng dẫn', style: TextStyle(fontSize: 11)),
+                icon: const Icon(Icons.play_arrow, size: 16),
+                label: const Text('Chạy', style: TextStyle(fontSize: 11)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accent,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   minimumSize: Size.zero,
                 ),
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      backgroundColor: AppColors.card,
-                      title: const Text('Tạo Shortcut 5G', style: TextStyle(color: Colors.white)),
-                      content: const Text(
-                        '1. Mở iOS Shortcuts app\n'
-                        '2. Tạo Shortcut mới\n'
-                        '3. Thêm action: "Ask for [Number/Text]"\n'
-                        '4. Thêm action: "Control WiFi" hoặc "Control Cellular"\n'
-                        '5. Share → Add to Home Screen\n\n'
-                        'Sau đó nhấn nút Shortcut từ app PokemonCT',
-                        style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                onPressed: () async {
+                  final ok = await ShortcutService.triggerShortcut('5G');
+                  if (!ok && mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Shortcut "5G" không tìm thấy'),
+                        backgroundColor: AppColors.error,
+                        duration: Duration(seconds: 2),
                       ),
-                      actions: [
-                        ElevatedButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('OK'),
-                        ),
-                      ],
-                    ),
-                  );
+                    );
+                  }
                 },
               ),
             ),
