@@ -22,7 +22,7 @@ class ImapConfig {
     required this.username,
     required this.password,
     this.isSecure = true,
-    this.pollIntervalSeconds = 2,
+    this.pollIntervalSeconds = 30,
   });
 }
 
@@ -48,6 +48,7 @@ class ImapService {
   ImapConfig? _config;
   List<FilterRule> _rules = [];
   bool _isRunning = false;
+  bool _polling = false; // prevent concurrent polls
 
   final _otpController = StreamController<OtpEntry>.broadcast();
   Stream<OtpEntry> get otpStream => _otpController.stream;
@@ -72,23 +73,38 @@ class ImapService {
     _isRunning = false;
     _pollTimer?.cancel();
     _pollTimer = null;
-    try { await _client?.logout(); } catch (_) {}
+    await _closeClient();
+  }
+
+  // Properly close connection and free the slot
+  Future<void> _closeClient() async {
+    final old = _client;
     _client = null;
+    if (old != null) {
+      try {
+        await old.logout();
+        _log('CONNECT', 'Disconnected ✓');
+      } catch (_) {}
+    }
   }
 
   Future<void> _connect() async {
     final config = _config!;
+    // Always close existing before opening a new one
+    await _closeClient();
     _log('CONNECT', 'Connecting to ${config.host}:${config.port}...');
-    _client = ImapClient(isLogEnabled: false);
+    final client = ImapClient(isLogEnabled: false);
     try {
-      await _client!.connectToServer(config.host, config.port, isSecure: config.isSecure);
+      await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
       _log('CONNECT', 'Connected ✓');
-      await _client!.login(config.username, config.password);
+      await client.login(config.username, config.password);
       _log('CONNECT', 'Logged in ✓');
-      await _client!.selectInbox();
+      await client.selectInbox();
       _log('CONNECT', 'Inbox selected ✓');
+      _client = client;
     } catch (e) {
       _log('CONNECT', 'Error: $e');
+      try { await client.logout(); } catch (_) {}
       rethrow;
     }
   }
@@ -104,23 +120,27 @@ class ImapService {
   }
 
   Future<List<OtpEntry>> _poll() async {
+    // Skip if already polling (timer fires while previous poll still running)
+    if (_polling) {
+      _log('POLL', 'Skipped (previous poll still running)');
+      return [];
+    }
+    _polling = true;
     final results = <OtpEntry>[];
     try {
       if (_client == null) await _connect();
 
       final mailbox = await _client!.selectInbox();
       final count = mailbox.messagesExists;
-      _log('POLL', 'Messages in inbox: $count');
+      _log('POLL', 'Messages: $count');
       if (count == 0) return results;
 
-      // Fetch last 20 messages
       final start = (count > 20 ? count - 19 : 1);
       final sequence = MessageSequence.fromRange(start, count);
-      _log('POLL', 'Fetching sequence $start-$count...');
+      _log('POLL', 'Fetching $start-$count...');
 
-      // Fetch with simple request
       final fetchResult = await _client!.fetchMessages(sequence, 'ENVELOPE BODY[]');
-      _log('POLL', 'Fetched ${fetchResult.messages.length} messages');
+      _log('POLL', 'Got ${fetchResult.messages.length} messages');
 
       final cutoff = DateTime.now().subtract(const Duration(hours: 1));
       for (final msg in fetchResult.messages) {
@@ -130,19 +150,21 @@ class ImapService {
         final entry = _extractOtp(msg);
         if (entry != null && !_otpController.isClosed) {
           results.add(entry);
-          _log('POLL', 'OTP found: ${entry.code}');
+          _log('POLL', 'OTP: ${entry.code}');
           _otpController.add(entry);
         }
       }
     } catch (e) {
       _log('POLL', 'Error: $e');
-      // Silently handle errors, disconnect to retry next poll
-      _client = null;
+      // Properly close the broken connection
+      await _closeClient();
+    } finally {
+      _polling = false;
     }
     return results;
   }
 
-  /// Tìm email theo tiêu đề + khoảng thời gian (dùng để debug / verify)
+  /// Tìm email. Tạm dừng poll khi search để tránh "too many connections"
   Future<List<EmailSearchResult>> searchEmails({
     required ImapConfig config,
     String subjectKeyword = '',
@@ -151,11 +173,17 @@ class ImapService {
     int maxMessages = 20,
   }) async {
     final results = <EmailSearchResult>[];
-    final client = ImapClient(isLogEnabled: true);
-    _log('SEARCH', 'Starting email search...');
-    _log('SEARCH', 'Keyword: $subjectKeyword, From: $from, To: $to, Max: $maxMessages');
+
+    // Pause poll timer and close existing connection to free the slot
+    final wasRunning = _isRunning;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _log('SEARCH', 'Paused poll timer, closing existing connection...');
+    await _closeClient();
+
+    _log('SEARCH', 'Connecting for search...');
+    final client = ImapClient(isLogEnabled: false);
     try {
-      _log('SEARCH', 'Connecting to ${config.host}:${config.port}...');
       await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
       _log('SEARCH', 'Connected ✓');
       await client.login(config.username, config.password);
@@ -166,13 +194,12 @@ class ImapService {
       _log('SEARCH', 'Total messages: $count');
       if (count == 0) return results;
 
-      // Fetch last N messages
       final fetchCount = count < maxMessages ? count : maxMessages;
       final startSeq = count - fetchCount + 1;
       final sequence = MessageSequence.fromRange(startSeq, count);
-      _log('SEARCH', 'Fetching sequence $startSeq-$count (total: $fetchCount messages)...');
+      _log('SEARCH', 'Fetching $startSeq-$count ($fetchCount messages)...');
       final fetchResult = await client.fetchMessages(sequence, 'ENVELOPE BODY[]');
-      _log('SEARCH', 'Successfully fetched ${fetchResult.messages.length} messages');
+      _log('SEARCH', 'Fetched ${fetchResult.messages.length} messages');
 
       final fromDate = from ?? DateTime.now().subtract(const Duration(hours: 24));
       final toDate = to ?? DateTime.now();
@@ -185,16 +212,13 @@ class ImapService {
         final sender = msg.from?.firstOrNull?.email ?? '';
         final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
 
-        // Filter by subject keyword
         if (subjectKeyword.isNotEmpty &&
             !subject.toLowerCase().contains(subjectKeyword.toLowerCase()) &&
             !body.toLowerCase().contains(subjectKeyword.toLowerCase())) {
           continue;
         }
 
-        // Try to extract OTP
-        String? otp = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
-
+        final otp = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
         results.add(EmailSearchResult(
           subject: subject.isEmpty ? '(no subject)' : subject,
           sender: sender,
@@ -211,8 +235,15 @@ class ImapService {
       try {
         await client.logout();
         _log('SEARCH', 'Logged out ✓');
-      } catch (e) {
-        _log('SEARCH', 'Logout error: $e');
+      } catch (_) {}
+
+      // Resume poll timer if it was running
+      if (wasRunning && _config != null) {
+        _log('SEARCH', 'Resuming poll timer...');
+        _pollTimer = Timer.periodic(
+          Duration(seconds: _config!.pollIntervalSeconds),
+          (_) => _poll(),
+        );
       }
     }
     return results;
@@ -267,7 +298,6 @@ class ImapService {
       }
     }
 
-    // Fallback
     final fallback = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
     if (fallback != null) {
       return OtpEntry(
@@ -281,18 +311,19 @@ class ImapService {
   }
 
   Future<bool> testConnection(ImapConfig config) async {
+    _log('TEST', 'Testing ${config.host}:${config.port}...');
     final client = ImapClient(isLogEnabled: false);
-    _log('TEST', 'Testing connection to ${config.host}:${config.port}...');
     try {
       await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
       _log('TEST', 'Connected ✓');
       await client.login(config.username, config.password);
       _log('TEST', 'Logged in ✓');
       await client.logout();
-      _log('TEST', 'Logged out ✓');
+      _log('TEST', 'OK ✓');
       return true;
     } catch (e) {
       _log('TEST', 'Failed: $e');
+      try { await client.logout(); } catch (_) {}
       return false;
     }
   }
