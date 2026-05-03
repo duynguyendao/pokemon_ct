@@ -17,7 +17,23 @@ class ImapConfig {
     required this.username,
     required this.password,
     this.isSecure = true,
-    this.pollIntervalSeconds = 30,
+    this.pollIntervalSeconds = 2,
+  });
+}
+
+class EmailSearchResult {
+  final String subject;
+  final String sender;
+  final String body;
+  final DateTime date;
+  final String? otpFound;
+
+  const EmailSearchResult({
+    required this.subject,
+    required this.sender,
+    required this.body,
+    required this.date,
+    this.otpFound,
   });
 }
 
@@ -30,7 +46,6 @@ class ImapService {
 
   final _otpController = StreamController<OtpEntry>.broadcast();
   Stream<OtpEntry> get otpStream => _otpController.stream;
-
   bool get isRunning => _isRunning;
 
   void setRules(List<FilterRule> rules) {
@@ -52,20 +67,14 @@ class ImapService {
     _isRunning = false;
     _pollTimer?.cancel();
     _pollTimer = null;
-    try {
-      await _client?.logout();
-    } catch (_) {}
+    try { await _client?.logout(); } catch (_) {}
     _client = null;
   }
 
   Future<void> _connect() async {
     final config = _config!;
     _client = ImapClient(isLogEnabled: false);
-    await _client!.connectToServer(
-      config.host,
-      config.port,
-      isSecure: config.isSecure,
-    );
+    await _client!.connectToServer(config.host, config.port, isSecure: config.isSecure);
     await _client!.login(config.username, config.password);
     await _client!.selectInbox();
   }
@@ -73,9 +82,7 @@ class ImapService {
   Future<List<OtpEntry>> fetchNow() async {
     if (_config == null) return [];
     try {
-      if (_client == null || !_isRunning) {
-        await _connect();
-      }
+      if (_client == null) await _connect();
       return await _poll();
     } catch (_) {
       return [];
@@ -86,24 +93,18 @@ class ImapService {
     final results = <OtpEntry>[];
     try {
       if (_client == null) await _connect();
-
-      // Get inbox message count then fetch last 15 messages
       final mailbox = await _client!.selectInbox();
       final count = mailbox.messagesExists;
       if (count == 0) return results;
 
       final start = count > 15 ? count - 14 : 1;
       final sequence = MessageSequence.fromRange(start, count);
-      final fetchResult = await _client!.fetchMessages(
-        sequence,
-        'ENVELOPE BODY.PEEK[TEXT]',
-      );
+      final fetchResult = await _client!.fetchMessages(sequence, 'ENVELOPE BODY.PEEK[TEXT]');
 
-      final cutoff = DateTime.now().subtract(const Duration(minutes: 10));
+      final cutoff = DateTime.now().subtract(const Duration(minutes: 30));
       for (final msg in fetchResult.messages) {
         final msgDate = msg.decodeDate();
         if (msgDate != null && msgDate.isBefore(cutoff)) continue;
-
         final entry = _extractOtp(msg);
         if (entry != null && !_otpController.isClosed) {
           results.add(entry);
@@ -114,6 +115,81 @@ class ImapService {
       _client = null;
     }
     return results;
+  }
+
+  /// Tìm email theo tiêu đề + khoảng thời gian (dùng để debug / verify)
+  Future<List<EmailSearchResult>> searchEmails({
+    required ImapConfig config,
+    String subjectKeyword = '',
+    DateTime? from,
+    DateTime? to,
+    int maxMessages = 20,
+  }) async {
+    final results = <EmailSearchResult>[];
+    final client = ImapClient(isLogEnabled: false);
+    try {
+      await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
+      await client.login(config.username, config.password);
+      final mailbox = await client.selectInbox();
+      final count = mailbox.messagesExists;
+      if (count == 0) return results;
+
+      // Fetch last N messages
+      final fetchCount = count < maxMessages ? count : maxMessages;
+      final startSeq = count - fetchCount + 1;
+      final sequence = MessageSequence.fromRange(startSeq, count);
+      final fetchResult = await client.fetchMessages(sequence, 'ENVELOPE BODY.PEEK[TEXT]');
+
+      final fromDate = from ?? DateTime.now().subtract(const Duration(hours: 24));
+      final toDate = to ?? DateTime.now();
+
+      for (final msg in fetchResult.messages.reversed) {
+        final msgDate = msg.decodeDate() ?? DateTime.now();
+        if (msgDate.isBefore(fromDate) || msgDate.isAfter(toDate)) continue;
+
+        final subject = msg.decodeSubject() ?? '';
+        final sender = msg.from?.firstOrNull?.email ?? '';
+        final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
+
+        // Filter by subject keyword
+        if (subjectKeyword.isNotEmpty &&
+            !subject.toLowerCase().contains(subjectKeyword.toLowerCase()) &&
+            !body.toLowerCase().contains(subjectKeyword.toLowerCase())) {
+          continue;
+        }
+
+        // Try to extract OTP
+        String? otp = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
+
+        results.add(EmailSearchResult(
+          subject: subject.isEmpty ? '(no subject)' : subject,
+          sender: sender,
+          body: body.length > 300 ? body.substring(0, 300) : body,
+          date: msgDate,
+          otpFound: otp,
+        ));
+      }
+    } catch (e) {
+      rethrow;
+    } finally {
+      try { await client.logout(); } catch (_) {}
+    }
+    return results;
+  }
+
+  String? _extractOtpFromText(String text) {
+    final patterns = [
+      r'【パスコード】\s*(\d{6})',
+      r'(?:パスコード|コード)[:：\s]+(\d{6})',
+      r'\b(\d{6})\b',
+    ];
+    for (final p in patterns) {
+      try {
+        final m = RegExp(p).firstMatch(text);
+        if (m != null) return m.group(1) ?? m.group(0);
+      } catch (_) {}
+    }
+    return null;
   }
 
   OtpEntry? _extractOtp(MimeMessage msg) {
@@ -137,7 +213,6 @@ class ImapService {
           } catch (_) {}
           break;
       }
-
       if (matches) {
         final otp = rule.extractOtp(body) ?? rule.extractOtp(subject);
         if (otp != null) {
@@ -151,29 +226,23 @@ class ImapService {
       }
     }
 
-    // Fallback: 6-digit code
-    final fallback = RegExp(r'\b(\d{6})\b').firstMatch(body) ??
-        RegExp(r'\b(\d{6})\b').firstMatch(subject);
+    // Fallback
+    final fallback = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
     if (fallback != null) {
       return OtpEntry(
-        code: fallback.group(1)!,
+        code: fallback,
         sender: sender,
         subject: subject,
         timestamp: msg.decodeDate() ?? DateTime.now(),
       );
     }
-
     return null;
   }
 
   Future<bool> testConnection(ImapConfig config) async {
     final client = ImapClient(isLogEnabled: false);
     try {
-      await client.connectToServer(
-        config.host,
-        config.port,
-        isSecure: config.isSecure,
-      );
+      await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
       await client.login(config.username, config.password);
       await client.logout();
       return true;

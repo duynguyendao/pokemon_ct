@@ -29,8 +29,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
   String? _latestOtp;
   String _statusText = '';
   bool _autoFilling = false;
+  String? _lastAutoFillUrl; // track để tránh điền 2 lần cùng URL
 
   static const _startUrl = 'https://www.pokemoncenter-online.com/login/';
+
+  // Chỉ auto-fill ở trang login, không phải trang passcode/OTP
+  bool _isLoginPage(String url) {
+    final u = url.toLowerCase();
+    return u.contains('/login') &&
+        !u.contains('passcode') &&
+        !u.contains('otp') &&
+        !u.contains('code') &&
+        !u.contains('verify');
+  }
 
   @override
   void initState() {
@@ -66,10 +77,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
             await _controller.runJavaScript(buildAntiFingerprintScript(_profile));
           }
 
-          // Auto-fill login page
-          if (url.contains('login') || _currentUrl.contains('pokemoncenter')) {
-            await Future.delayed(const Duration(milliseconds: 300));
-            await _autoFill();
+          // Auto-fill: chỉ trigger đúng trang login, không lặp lại cùng URL
+          if (_isLoginPage(url) && _lastAutoFillUrl != url && !_autoFilling) {
+            _lastAutoFillUrl = url;
+            await Future.delayed(const Duration(milliseconds: 600));
+            await _autoFill(silent: true);
           }
 
           // Check OTP field

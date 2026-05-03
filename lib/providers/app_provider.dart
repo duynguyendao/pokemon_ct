@@ -6,6 +6,7 @@ import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
 import '../services/storage_service.dart';
 import '../services/imap_service.dart';
+export '../services/imap_service.dart' show EmailSearchResult;
 
 class AppProvider extends ChangeNotifier {
   final StorageService _storage = StorageService();
@@ -261,6 +262,11 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearOtpHistory() {
+    _otpHistory.clear();
+    notifyListeners();
+  }
+
   Future<List<OtpEntry>> fetchOtpNow() async {
     final results = await _imap.fetchNow();
     for (final otp in results) {
@@ -273,6 +279,23 @@ class AppProvider extends ChangeNotifier {
     }
     notifyListeners();
     return results;
+  }
+
+  Future<List<EmailSearchResult>> searchEmails({
+    String subjectKeyword = '',
+    DateTime? from,
+    DateTime? to,
+    int maxMessages = 20,
+  }) async {
+    final config = _buildImapConfig();
+    if (config == null) return [];
+    return _imap.searchEmails(
+      config: config,
+      subjectKeyword: subjectKeyword,
+      from: from,
+      to: to,
+      maxMessages: maxMessages,
+    );
   }
 
   ImapConfig? _buildImapConfig() {
