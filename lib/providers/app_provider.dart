@@ -334,23 +334,28 @@ class AppProvider extends ChangeNotifier {
   String? get latestOtp =>
       _otpHistory.isNotEmpty ? _otpHistory.first.code : null;
 
-  /// Lấy OTP mới nhất dành riêng cho account email này
-  /// Hỗ trợ "Hide My Email <real@email.com>" — so sánh phần email thực
-  String? latestOtpForEmail(String accountEmail) {
+  /// Lấy OTP mới nhất dành riêng cho account email này.
+  /// [after]: chỉ lấy OTP có timestamp >= after (lọc theo thời điểm bấm ログイン).
+  String? latestOtpForEmail(String accountEmail, {DateTime? after}) {
     final target = accountEmail.toLowerCase().trim();
     for (final otp in _otpHistory) {
       final r = otp.recipient?.toLowerCase().trim() ?? '';
-      if (r == target) return otp.code;
+      if (r != target) continue;
+      if (after != null && otp.timestamp.isBefore(after)) continue;
+      return otp.code;
     }
     return null;
   }
 
-  /// OTP entry mới nhất cho account email
-  OtpEntry? latestOtpEntryForEmail(String accountEmail) {
+  /// OTP entry mới nhất cho account email.
+  /// [after]: chỉ lấy OTP có timestamp >= after.
+  OtpEntry? latestOtpEntryForEmail(String accountEmail, {DateTime? after}) {
     final target = accountEmail.toLowerCase().trim();
     for (final otp in _otpHistory) {
       final r = otp.recipient?.toLowerCase().trim() ?? '';
-      if (r == target) return otp;
+      if (r != target) continue;
+      if (after != null && otp.timestamp.isBefore(after)) continue;
+      return otp;
     }
     return null;
   }

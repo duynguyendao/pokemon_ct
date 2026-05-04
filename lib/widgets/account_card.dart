@@ -13,6 +13,7 @@ class AccountCard extends StatelessWidget {
   final VoidCallback onToggleStatus;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final ValueChanged<AccountMode> onModeChange;
 
   const AccountCard({
     super.key,
@@ -25,7 +26,14 @@ class AccountCard extends StatelessWidget {
     required this.onToggleStatus,
     required this.onEdit,
     required this.onDelete,
+    required this.onModeChange,
   });
+
+  static const _modeColors = {
+    AccountMode.loginOnly: AppColors.primary,
+    AccountMode.lottery: AppColors.accent,
+    AccountMode.lotteryResult: AppColors.done,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -70,13 +78,14 @@ class AccountCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: Container(
           margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
           decoration: BoxDecoration(
             color: isSelected ? AppColors.secondary.withAlpha(40) : AppColors.card,
             borderRadius: BorderRadius.circular(12),
             border: isSelected ? Border.all(color: AppColors.secondary, width: 1.5) : null,
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Batch checkbox or status button
               if (batchMode)
@@ -123,75 +132,61 @@ class AccountCard extends StatelessWidget {
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    Row(
-                      children: [
-                        if (account.group != null) ...[
-                          Container(
-                            margin: const EdgeInsets.only(right: 6, top: 2),
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: AppColors.secondary.withAlpha(40),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              account.group!,
-                              style: const TextStyle(
-                                  color: AppColors.secondary, fontSize: 10),
-                            ),
-                          ),
+
+                    // Tags row: group + proxy
+                    if (account.group != null || proxy != null) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          if (account.group != null)
+                            _tag(account.group!, AppColors.secondary),
+                          if (proxy != null)
+                            Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.vpn_lock, size: 10, color: AppColors.done),
+                              const SizedBox(width: 3),
+                              _tag(proxy!.displayLabel, AppColors.done),
+                            ]),
                         ],
-                        if (account.mode != AccountMode.loginOnly) ...[
-                          Container(
-                            margin: const EdgeInsets.only(right: 6, top: 2),
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: account.mode == AccountMode.lottery
-                                  ? AppColors.accent.withAlpha(40)
-                                  : AppColors.done.withAlpha(30),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              account.mode.label,
-                              style: TextStyle(
-                                color: account.mode == AccountMode.lottery
-                                    ? AppColors.accent
-                                    : AppColors.done,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
+                      ),
+                    ],
+
+                    // Mode selector chips
+                    const SizedBox(height: 4),
+                    if (!batchMode)
+                      Row(
+                        children: AccountMode.values.map((mode) {
+                          final active = account.mode == mode;
+                          final color = _modeColors[mode]!;
+                          return GestureDetector(
+                            onTap: () => onModeChange(mode),
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 5),
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: active ? color.withAlpha(50) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(5),
+                                border: Border.all(
+                                  color: active ? color : AppColors.divider,
+                                  width: active ? 1.2 : 0.8,
+                                ),
+                              ),
+                              child: Text(
+                                mode.label,
+                                style: TextStyle(
+                                  color: active ? color : AppColors.textSecondary,
+                                  fontSize: 10,
+                                  fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                        if (proxy != null) ...[
-                          Container(
-                            margin: const EdgeInsets.only(top: 2),
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: AppColors.done.withAlpha(30),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.vpn_lock,
-                                    size: 10, color: AppColors.done),
-                                const SizedBox(width: 3),
-                                Text(
-                                  proxy!.displayLabel,
-                                  style: const TextStyle(
-                                      color: AppColors.done, fontSize: 10),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+                          );
+                        }).toList(),
+                      ),
                   ],
                 ),
               ),
 
-              // Actions
+              // Actions menu
               if (!batchMode)
                 PopupMenuButton<String>(
                   color: AppColors.surfaceVariant,
@@ -242,4 +237,14 @@ class AccountCard extends StatelessWidget {
       ),
     );
   }
+
+  Widget _tag(String text, Color color) => Container(
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withAlpha(40),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(text, style: TextStyle(color: color, fontSize: 10)),
+      );
 }

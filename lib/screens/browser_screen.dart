@@ -37,6 +37,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   static const int _maxOtpRetries = 3;
   String? _lastSubmittedOtp;
 
+  // Thời điểm bấm ログイン — chỉ lấy OTP gửi SAU thời điểm này
+  DateTime? _loginAttemptTime;
+
   // JS để phát hiện field OTP và lỗi trên trang
   static const String _detectOtpFieldJs = '''
 (function() {
@@ -184,7 +187,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   String? _getOtpForAccount() =>
-      context.read<AppProvider>().latestOtpForEmail(widget.account.email);
+      context.read<AppProvider>().latestOtpForEmail(
+        widget.account.email,
+        after: _loginAttemptTime,
+      );
 
   Future<void> _autoSubmitOtp() async {
     if (!mounted) return;
@@ -240,6 +246,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _autoFill({bool silent = false}) async {
+    // Reset login timestamp khi bắt đầu lại flow login
+    _loginAttemptTime = null;
     setState(() { _autoFilling = true; _statusText = '📧 Điền email + password...'; });
     try {
       await Future.delayed(const Duration(milliseconds: 300));
@@ -247,6 +255,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
           buildAutoFillScript(widget.account.email, widget.account.password));
       setState(() => _statusText = '🔐 Đang login...');
       await Future.delayed(const Duration(milliseconds: 700));
+
+      // Ghi lại thời điểm bấm ログイン — chỉ nhận OTP từ sau thời điểm này
+      _loginAttemptTime = DateTime.now();
 
       await _controller.runJavaScript('''
 (function() {
@@ -434,7 +445,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   // OTP display — nhấn để fill + submit thủ công
                   Consumer<AppProvider>(
                     builder: (_, prov, __) {
-                      final otp = prov.latestOtpForEmail(widget.account.email);
+                      final otp = prov.latestOtpForEmail(
+                        widget.account.email,
+                        after: _loginAttemptTime,
+                      );
                       return GestureDetector(
                         onTap: otp != null ? () => _doSubmitOtp(otp) : null,
                         child: Container(

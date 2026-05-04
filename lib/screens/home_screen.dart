@@ -613,6 +613,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         onToggleStatus: () => p.toggleStatus(account.id),
                         onEdit: () => _showEditDialog(context, account, p),
                         onDelete: () => p.deleteAccount(account.id),
+                        onModeChange: (mode) => p.updateAccount(account.copyWith(mode: mode)),
                       );
                     },
                   ),
