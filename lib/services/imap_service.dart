@@ -160,12 +160,27 @@ class ImapService {
       final fetchResult = await _client!.fetchMessages(batch, '(BODY.PEEK[])');
       _log('POLL', 'Got ${fetchResult.messages.length} messages');
 
+      final toMarkRead = <int>[];
       for (final msg in fetchResult.messages) {
         final entry = _extractOtp(msg);
         if (entry != null && !_otpController.isClosed) {
           results.add(entry);
-          _log('POLL', 'OTP: ${entry.code}');
+          _log('POLL', 'OTP: ${entry.code} → ${entry.recipient}');
           _otpController.add(entry);
+          if (msg.sequenceId != null) toMarkRead.add(msg.sequenceId!);
+        }
+      }
+      // Đánh dấu đã đọc
+      if (toMarkRead.isNotEmpty) {
+        try {
+          await _client!.store(
+            MessageSequence.fromIds(toMarkRead),
+            [r'\Seen'],
+            action: StoreAction.add,
+          );
+          _log('POLL', 'Marked ${toMarkRead.length} as read');
+        } catch (e) {
+          _log('POLL', 'Mark read error: $e');
         }
       }
     } catch (e) {
@@ -299,10 +314,20 @@ class ImapService {
     return null;
   }
 
+  /// Lấy địa chỉ email thuần từ chuỗi "Name <email>" hoặc "Hide My Email <email>"
+  String _parseEmail(String raw) {
+    final match = RegExp(r'<([^>]+@[^>]+)>').firstMatch(raw);
+    return (match?.group(1) ?? raw).trim().toLowerCase();
+  }
+
   OtpEntry? _extractOtp(MimeMessage msg) {
     final sender = msg.from?.firstOrNull?.email ?? '';
     final subject = msg.decodeSubject() ?? '';
     final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
+
+    // Lấy email người nhận (xử lý cả "Hide My Email <real@email.com>")
+    final toRaw = msg.to?.firstOrNull?.toString() ?? '';
+    final recipient = _parseEmail(toRaw);
 
     for (final rule in _rules) {
       bool matches = false;
@@ -327,13 +352,14 @@ class ImapService {
             code: otp,
             sender: sender,
             subject: subject,
+            recipient: recipient.isNotEmpty ? recipient : null,
             timestamp: msg.decodeDate() ?? DateTime.now(),
           );
         }
       }
     }
 
-    // Chỉ dùng fallback khi chưa có rule nào — tránh lấy OTP từ email khác (AliExpress, v.v.)
+    // Chỉ dùng fallback khi chưa có rule nào
     if (_rules.isEmpty) {
       final fallback = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
       if (fallback != null) {
@@ -341,6 +367,7 @@ class ImapService {
           code: fallback,
           sender: sender,
           subject: subject,
+          recipient: recipient.isNotEmpty ? recipient : null,
           timestamp: msg.decodeDate() ?? DateTime.now(),
         );
       }

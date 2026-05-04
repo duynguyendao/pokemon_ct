@@ -334,6 +334,27 @@ class AppProvider extends ChangeNotifier {
   String? get latestOtp =>
       _otpHistory.isNotEmpty ? _otpHistory.first.code : null;
 
+  /// Lấy OTP mới nhất dành riêng cho account email này
+  /// Hỗ trợ "Hide My Email <real@email.com>" — so sánh phần email thực
+  String? latestOtpForEmail(String accountEmail) {
+    final target = accountEmail.toLowerCase().trim();
+    for (final otp in _otpHistory) {
+      final r = otp.recipient?.toLowerCase().trim() ?? '';
+      if (r == target) return otp.code;
+    }
+    return null;
+  }
+
+  /// OTP entry mới nhất cho account email
+  OtpEntry? latestOtpEntryForEmail(String accountEmail) {
+    final target = accountEmail.toLowerCase().trim();
+    for (final otp in _otpHistory) {
+      final r = otp.recipient?.toLowerCase().trim() ?? '';
+      if (r == target) return otp;
+    }
+    return null;
+  }
+
   @override
   void dispose() {
     _otpSub?.cancel();

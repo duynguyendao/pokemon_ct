@@ -140,6 +140,28 @@ class AccountCard extends StatelessWidget {
                             ),
                           ),
                         ],
+                        if (account.mode != AccountMode.loginOnly) ...[
+                          Container(
+                            margin: const EdgeInsets.only(right: 6, top: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: account.mode == AccountMode.lottery
+                                  ? AppColors.accent.withAlpha(40)
+                                  : AppColors.done.withAlpha(30),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              account.mode.label,
+                              style: TextStyle(
+                                color: account.mode == AccountMode.lottery
+                                    ? AppColors.accent
+                                    : AppColors.done,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
                         if (proxy != null) ...[
                           Container(
                             margin: const EdgeInsets.only(top: 2),

@@ -11,8 +11,9 @@ import '../utils/device_profiles.dart';
 class BrowserScreen extends StatefulWidget {
   final Account account;
   final Proxy? proxy;
+  final String? startUrl;
 
-  const BrowserScreen({super.key, required this.account, this.proxy});
+  const BrowserScreen({super.key, required this.account, this.proxy, this.startUrl});
 
   @override
   State<BrowserScreen> createState() => _BrowserScreenState();
@@ -36,10 +37,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   static const int _maxOtpRetries = 3;
   String? _lastSubmittedOtp;
 
-  // JS để phát hiện field OTP trên trang
+  // JS để phát hiện field OTP và lỗi trên trang
   static const String _detectOtpFieldJs = '''
 (function() {
-  // Pokémon Center: input#authCode hoặc input[name="dwfrm_factor2Auth_authCode"]
   var selectors = [
     'input#authCode',
     'input[name="dwfrm_factor2Auth_authCode"]',
@@ -53,8 +53,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
       break;
     }
   }
-  // Phát hiện thông báo lỗi
-  var errorWords = ['パスコードが正しくありません','パスコードが違','正しくない','無効','incorrect','invalid','expired'];
+  // Phát hiện lỗi xác thực (bao gồm thông báo của Pokémon Center)
+  var errorWords = [
+    'パスコードの認証に失敗しました',
+    'パスコードが正しくありません','パスコードが違',
+    '正しくない','無効','期限切れ','incorrect','invalid','expired'
+  ];
   var bodyText = document.body ? document.body.innerText : '';
   for (var j = 0; j < errorWords.length; j++) {
     if (bodyText.indexOf(errorWords[j]) >= 0) {
@@ -69,8 +73,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void initState() {
     super.initState();
     _profile = randomProfile();
-    // context.read là safe trong initState
-    final startUrl = context.read<AppProvider>().loginUrl;
+    final startUrl = widget.startUrl ?? context.read<AppProvider>().loginUrl;
     _initController(startUrl);
   }
 
@@ -180,17 +183,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
+  String? _getOtpForAccount() =>
+      context.read<AppProvider>().latestOtpForEmail(widget.account.email);
+
   Future<void> _autoSubmitOtp() async {
     if (!mounted) return;
-    final otp = context.read<AppProvider>().latestOtp;
+    final otp = _getOtpForAccount();
 
     if (otp == null) {
-      setState(() => _statusText = '⏳ Chờ OTP từ email...');
-      // Chờ tối đa 30 giây
+      setState(() => _statusText = '⏳ Chờ OTP cho ${widget.account.email}...');
       for (int i = 0; i < 30; i++) {
         await Future.delayed(const Duration(seconds: 1));
         if (!mounted) return;
-        final newOtp = context.read<AppProvider>().latestOtp;
+        final newOtp = _getOtpForAccount();
         if (newOtp != null) {
           await _doSubmitOtp(newOtp);
           return;
@@ -225,7 +230,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     for (int i = 0; i < 60; i++) {
       await Future.delayed(const Duration(seconds: 1));
       if (!mounted) return;
-      final newOtp = context.read<AppProvider>().latestOtp;
+      final newOtp = _getOtpForAccount();
       if (newOtp != null && newOtp != _lastSubmittedOtp) {
         await _doSubmitOtp(newOtp);
         return;
@@ -429,7 +434,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   // OTP display — nhấn để fill + submit thủ công
                   Consumer<AppProvider>(
                     builder: (_, prov, __) {
-                      final otp = prov.latestOtp;
+                      final otp = prov.latestOtpForEmail(widget.account.email);
                       return GestureDetector(
                         onTap: otp != null ? () => _doSubmitOtp(otp) : null,
                         child: Container(

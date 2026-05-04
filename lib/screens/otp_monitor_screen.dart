@@ -861,6 +861,11 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (otp.recipient != null)
+              Text(
+                'To: ${otp.recipient!}',
+                style: const TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w500),
+              ),
             if (otp.sender != null)
               Text(otp.sender!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
             Text(_timeFmt.format(otp.timestamp),

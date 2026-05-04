@@ -25,6 +25,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<String> _selected = {};
   final _searchCtrl = TextEditingController();
 
+  // Start All
+  bool _runningAll = false;
+  int _runAllIndex = 0;
+  List<Account> _runAllList = [];
+
   List<Account> _filtered(AppProvider p) {
     var list = p.accounts;
     if (_searchQuery.isNotEmpty) {
@@ -48,6 +53,50 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         _selected.add(id);
       }
+    });
+  }
+
+  Future<void> _moveBatchToGroup(AppProvider p) async {
+    String? selectedGroup = _groupFilter;
+    final result = await showDialog<String?>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx2, setS) => AlertDialog(
+          backgroundColor: AppColors.card,
+          title: Text(
+            'Chuyển ${_selected.length} tài khoản vào nhóm',
+            style: const TextStyle(color: Colors.white),
+          ),
+          content: DropdownButtonFormField<String?>(
+            value: selectedGroup,
+            dropdownColor: AppColors.surfaceVariant,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(labelText: 'Nhóm'),
+            items: [
+              const DropdownMenuItem(value: null, child: Text('Không có nhóm')),
+              ...p.groups.map((g) => DropdownMenuItem(value: g, child: Text(g))),
+            ],
+            onChanged: (v) => setS(() => selectedGroup = v),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('Hủy')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx2, selectedGroup ?? '__none__'),
+              child: const Text('Chuyển'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+    final group = result == '__none__' ? null : result;
+    for (final id in _selected.toList()) {
+      final idx = p.accounts.indexWhere((a) => a.id == id);
+      if (idx >= 0) await p.updateAccount(p.accounts[idx].copyWith(group: group));
+    }
+    setState(() {
+      _selected.clear();
+      _batchMode = false;
     });
   }
 
@@ -80,56 +129,80 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openAccount(Account account, AppProvider p) async {
-    // Show loading dialog while 5G shortcut runs
     if (mounted) {
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (_) => AlertDialog(
           backgroundColor: AppColors.card,
-          content: const Column(
+          content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
-                width: 40,
-                height: 40,
+              const SizedBox(
+                width: 40, height: 40,
                 child: CircularProgressIndicator(color: AppColors.accent),
               ),
-              SizedBox(height: 16),
-              Text('⚡ Chạy 5G Shortcut...',
-                  style: TextStyle(color: Colors.white)),
-              SizedBox(height: 8),
-              Text('Chờ IP thay đổi',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              const SizedBox(height: 16),
+              const Text('⚡ Chạy 5G Shortcut...', style: TextStyle(color: Colors.white)),
+              const SizedBox(height: 8),
+              Text(
+                account.mode == AccountMode.loginOnly ? 'Login'
+                    : account.mode == AccountMode.lottery ? 'Lottery'
+                    : 'Lottery Result',
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
             ],
           ),
         ),
       );
     }
 
-    // Trigger 5G shortcut
     await ShortcutService.triggerShortcut('5G');
-
-    // Wait for IP change
     await Future.delayed(const Duration(seconds: 5));
 
     if (mounted) {
-      Navigator.pop(context); // Close loading dialog
+      Navigator.pop(context);
+
+      // Xác định URL theo mode của account
+      String startUrl = p.loginUrl;
+      if (account.mode == AccountMode.lottery && p.lotteryUrl.isNotEmpty) {
+        startUrl = p.lotteryUrl;
+      } else if (account.mode == AccountMode.lotteryResult && p.lotteryResultUrl.isNotEmpty) {
+        startUrl = p.lotteryResultUrl;
+      }
 
       final proxy = p.proxyEnabled ? p.getProxyById(account.proxyId) ?? p.nextProxy : null;
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => BrowserScreen(account: account, proxy: proxy),
+          builder: (_) => BrowserScreen(account: account, proxy: proxy, startUrl: startUrl),
         ),
       );
     }
+  }
+
+  Future<void> _runAllAccounts(AppProvider p) async {
+    final list = _filtered(p).where((a) => a.status == 'todo').toList();
+    if (list.isEmpty) return;
+    setState(() {
+      _runningAll = true;
+      _runAllIndex = 0;
+      _runAllList = list;
+    });
+    for (var i = 0; i < list.length; i++) {
+      if (!_runningAll || !mounted) break;
+      setState(() => _runAllIndex = i);
+      await _openAccount(list[i], p);
+      if (!mounted) break;
+    }
+    if (mounted) setState(() => _runningAll = false);
   }
 
   void _showEditDialog(BuildContext ctx, Account account, AppProvider p) {
     final emailCtrl = TextEditingController(text: account.email);
     final passCtrl = TextEditingController(text: account.password);
     String? selectedGroup = account.group;
+    AccountMode selectedMode = account.mode;
 
     showDialog(
       context: ctx,
@@ -164,6 +237,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                   onChanged: (v) => setS(() => selectedGroup = v),
                 ),
+                const SizedBox(height: 12),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Chế độ mở', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                ),
+                const SizedBox(height: 4),
+                ...AccountMode.values.map((mode) => RadioListTile<AccountMode>(
+                  value: mode,
+                  groupValue: selectedMode,
+                  onChanged: (v) => setS(() => selectedMode = v!),
+                  title: Text(mode.label, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  activeColor: AppColors.primary,
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                )),
               ],
             ),
           ),
@@ -175,6 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   email: emailCtrl.text.trim(),
                   password: passCtrl.text.trim(),
                   group: selectedGroup,
+                  mode: selectedMode,
                 ));
                 Navigator.pop(ctx2);
               },
@@ -367,9 +456,27 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
         actions: [
-          if (_batchMode) ...[
+          if (_runningAll) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                '${_runAllIndex + 1}/${_runAllList.length}',
+                style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.stop_circle, color: AppColors.error),
+              tooltip: 'Dừng Start All',
+              onPressed: () => setState(() => _runningAll = false),
+            ),
+          ] else if (_batchMode) ...[
             Text('${_selected.length} đã chọn',
                 style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+            IconButton(
+              icon: const Icon(Icons.drive_file_move_outlined),
+              tooltip: 'Chuyển nhóm',
+              onPressed: _selected.isEmpty ? null : () => _moveBatchToGroup(p),
+            ),
             IconButton(
               icon: const Icon(Icons.delete, color: AppColors.error),
               onPressed: () => _deleteBatch(p),
@@ -382,6 +489,11 @@ class _HomeScreenState extends State<HomeScreen> {
               }),
             ),
           ] else ...[
+            IconButton(
+              icon: const Icon(Icons.play_circle_outline, color: AppColors.done),
+              tooltip: 'Start All (chạy tuần tự tất cả TODO)',
+              onPressed: () => _runAllAccounts(p),
+            ),
             IconButton(
               icon: Icon(_searchVisible ? Icons.close : Icons.search),
               onPressed: () => setState(() {

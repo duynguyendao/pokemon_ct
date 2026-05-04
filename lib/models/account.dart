@@ -1,5 +1,34 @@
 import 'package:uuid/uuid.dart';
 
+/// Chế độ hoạt động khi mở account
+enum AccountMode { loginOnly, lottery, lotteryResult }
+
+extension AccountModeExt on AccountMode {
+  String get label {
+    switch (this) {
+      case AccountMode.loginOnly: return 'Login';
+      case AccountMode.lottery: return 'Lottery';
+      case AccountMode.lotteryResult: return 'Result';
+    }
+  }
+
+  String get value {
+    switch (this) {
+      case AccountMode.loginOnly: return 'loginOnly';
+      case AccountMode.lottery: return 'lottery';
+      case AccountMode.lotteryResult: return 'lotteryResult';
+    }
+  }
+
+  static AccountMode fromValue(String? v) {
+    switch (v) {
+      case 'lottery': return AccountMode.lottery;
+      case 'lotteryResult': return AccountMode.lotteryResult;
+      default: return AccountMode.loginOnly;
+    }
+  }
+}
+
 class Account {
   final String id;
   String email;
@@ -7,6 +36,7 @@ class Account {
   String status; // 'todo' | 'done'
   String? group;
   String? proxyId;
+  AccountMode mode;
   final DateTime createdAt;
   Map<String, dynamic> presets;
 
@@ -17,6 +47,7 @@ class Account {
     this.status = 'todo',
     this.group,
     this.proxyId,
+    this.mode = AccountMode.loginOnly,
     DateTime? createdAt,
     Map<String, dynamic>? presets,
   })  : id = id ?? const Uuid().v4(),
@@ -29,6 +60,7 @@ class Account {
     String? status,
     String? group,
     String? proxyId,
+    AccountMode? mode,
     Map<String, dynamic>? presets,
   }) {
     return Account(
@@ -38,6 +70,7 @@ class Account {
       status: status ?? this.status,
       group: group ?? this.group,
       proxyId: proxyId ?? this.proxyId,
+      mode: mode ?? this.mode,
       createdAt: createdAt,
       presets: presets ?? Map.from(this.presets),
     );
@@ -50,6 +83,7 @@ class Account {
         'status': status,
         'group': group,
         'proxyId': proxyId,
+        'mode': mode.value,
         'createdAt': createdAt.toIso8601String(),
         'presets': presets,
       };
@@ -61,6 +95,7 @@ class Account {
         status: json['status'] as String? ?? 'todo',
         group: json['group'] as String?,
         proxyId: json['proxyId'] as String?,
+        mode: AccountModeExt.fromValue(json['mode'] as String?),
         createdAt: json['createdAt'] != null
             ? DateTime.parse(json['createdAt'] as String)
             : null,
