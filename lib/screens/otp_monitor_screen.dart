@@ -216,7 +216,13 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
                   decoration: const InputDecoration(labelText: 'Loại'),
                   items: FilterType.values.map((t) => DropdownMenuItem(
                     value: t,
-                    child: Text(t == FilterType.sender ? 'Người gửi' : t == FilterType.subject ? 'Tiêu đề' : 'Regex'),
+                    child: Text(const {
+                      FilterType.sender:    'Người gửi',
+                      FilterType.subject:   'Tiêu đề',
+                      FilterType.recipient: 'Người nhận',
+                      FilterType.body:      'Nội dung email',
+                      FilterType.regex:     'Regex',
+                    }[t]!),
                   )).toList(),
                   onChanged: (v) => setS(() => type = v!),
                 ),
@@ -224,11 +230,17 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
                 TextField(
                   controller: patternCtrl,
                   style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Pattern',
-                    hintText: 'pokemoncenter-online',
-                    helperText: 'Chuỗi cần khớp trong sender/subject/body',
-                    helperStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    hintText: {
+                      FilterType.sender:    'pokemoncenter-online.com',
+                      FilterType.subject:   'ログイン用パスコード',
+                      FilterType.recipient: 'abc@gmail.com',
+                      FilterType.body:      'パスコード',
+                      FilterType.regex:     r'\b(\d{6})\b',
+                    }[type] ?? 'pokemoncenter-online.com',
+                    helperText: 'Chuỗi cần khớp (người gửi / tiêu đề / người nhận / nội dung / regex)',
+                    helperStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
                   ),
                 ),
                 const SizedBox(height: 12),

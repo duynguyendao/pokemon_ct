@@ -164,13 +164,13 @@ class ImapService {
       if (_client == null) await _reconnect(); // preserves _lastSeenUid
       await _client!.selectMailboxByPath('INBOX');
 
-      // Build search: UID after last seen, or last 5 min if no UID yet
+      // Build search: UID after last seen, or today if no UID yet
       final String searchCrit;
       if (_lastSeenUid > 0) {
         searchCrit = 'UID ${_lastSeenUid + 1}:*';
       } else {
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        final d = DateTime.now().subtract(const Duration(minutes: 5));
+        final d = DateTime.now();
         searchCrit = 'SINCE ${d.day}-${months[d.month - 1]}-${d.year}';
       }
       _log('POLL', 'Search: $searchCrit');
@@ -200,6 +200,12 @@ class ImapService {
 
       final toMarkRead = <int>[];
       for (final msg in fetchResult.messages) {
+        // 1-minute freshness guard — skip OTPs from emails older than 60 seconds
+        final msgDate = msg.decodeDate();
+        if (msgDate != null && DateTime.now().difference(msgDate).inSeconds > 60) {
+          _log('POLL', 'Skip stale email (${DateTime.now().difference(msgDate).inSeconds}s old)');
+          continue;
+        }
         final entry = _extractOtp(msg);
         if (entry != null && !_otpController.isClosed) {
           results.add(entry);
@@ -476,6 +482,12 @@ class ImapService {
           break;
         case FilterType.subject:
           matches = subject.toLowerCase().contains(rule.pattern.toLowerCase());
+          break;
+        case FilterType.recipient:
+          matches = recipient.toLowerCase().contains(rule.pattern.toLowerCase());
+          break;
+        case FilterType.body:
+          matches = body.toLowerCase().contains(rule.pattern.toLowerCase());
           break;
         case FilterType.regex:
           try {

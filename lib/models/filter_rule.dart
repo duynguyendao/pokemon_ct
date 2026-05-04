@@ -1,6 +1,6 @@
 import 'package:uuid/uuid.dart';
 
-enum FilterType { sender, subject, regex }
+enum FilterType { sender, subject, recipient, body, regex }
 
 class FilterRule {
   final String id;
@@ -19,12 +19,11 @@ class FilterRule {
 
   String get typeLabel {
     switch (type) {
-      case FilterType.sender:
-        return 'Sender';
-      case FilterType.subject:
-        return 'Subject';
-      case FilterType.regex:
-        return 'Regex';
+      case FilterType.sender:    return 'Sender';
+      case FilterType.subject:   return 'Subject';
+      case FilterType.recipient: return 'Recipient';
+      case FilterType.body:      return 'Body';
+      case FilterType.regex:     return 'Regex';
     }
   }
 
