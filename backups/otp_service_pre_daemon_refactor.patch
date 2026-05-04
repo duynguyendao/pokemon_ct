@@ -1,0 +1,1601 @@
+diff --git a/lib/providers/app_provider.dart b/lib/providers/app_provider.dart
+index ddec71e..c662be6 100644
+--- a/lib/providers/app_provider.dart
++++ b/lib/providers/app_provider.dart
+@@ -343,20 +343,16 @@ class AppProvider extends ChangeNotifier {
+     final portStr = _imapConfig['port'];
+     final user = _imapConfig['username'];
+     final pass = _imapConfig['password'];
+-    final pollStr = _imapConfig['pollInterval'];
+ 
+     if (host == null || user == null || pass == null) return null;
+ 
+-    final parsedPoll = int.tryParse(pollStr ?? '') ?? 2;
+-    final fastPoll = parsedPoll.clamp(1, 5).toInt();
+-
+     return ImapConfig(
+       host: host,
+       port: int.tryParse(portStr ?? '') ?? 993,
+       username: user,
+       password: pass,
+       isSecure: (int.tryParse(portStr ?? '') ?? 993) == 993,
+-      pollIntervalSeconds: fastPoll,
++      pollIntervalSeconds: 1,
+     );
+   }
+ 
+diff --git a/lib/screens/browser_screen.dart b/lib/screens/browser_screen.dart
+index 67dca87..ae15511 100644
+--- a/lib/screens/browser_screen.dart
++++ b/lib/screens/browser_screen.dart
+@@ -394,7 +394,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
+ 
+     timeoutTimer = Timer(timeout, () => finish(null));
+     fetchTimer = Timer.periodic(
+-      const Duration(seconds: 2),
++      const Duration(seconds: 1),
+       (_) => unawaited(fetchAndCheck()),
+     );
+     statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+diff --git a/lib/screens/otp_monitor_screen.dart b/lib/screens/otp_monitor_screen.dart
+index 75679d5..394106e 100644
+--- a/lib/screens/otp_monitor_screen.dart
++++ b/lib/screens/otp_monitor_screen.dart
+@@ -24,17 +24,19 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+   final _portCtrl = TextEditingController(text: '993');
+   final _userCtrl = TextEditingController(text: 'duynguyenpk8793@gmail.com');
+   final _passCtrl = TextEditingController();
+-  final _pollCtrl = TextEditingController(text: '2'); // 2 seconds = fastest
++  final _pollCtrl = TextEditingController(text: '1');
+ 
+   // URL config
+-  final _loginUrlCtrl = TextEditingController(text: 'https://www.pokemoncenter-online.com/login/');
++  final _loginUrlCtrl = TextEditingController(
++    text: 'https://www.pokemoncenter-online.com/login/',
++  );
+   final _lotteryUrlCtrl = TextEditingController();
+   final _lotteryResultUrlCtrl = TextEditingController();
+ 
+   // Search
+   final _searchSubjectCtrl = TextEditingController(text: 'ポケモンセンター');
+   final _searchBodyCtrl = TextEditingController();
+-  DateTime _searchFrom = DateTime.now().subtract(const Duration(hours: 1));
++  DateTime _searchFrom = DateTime.now().subtract(const Duration(minutes: 2));
+   DateTime _searchTo = DateTime.now();
+   List<EmailSearchResult> _searchResults = [];
+   bool _searching = false;
+@@ -62,11 +64,15 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+     if (cfg['port']?.isNotEmpty == true) _portCtrl.text = cfg['port']!;
+     if (cfg['username']?.isNotEmpty == true) _userCtrl.text = cfg['username']!;
+     if (cfg['password']?.isNotEmpty == true) _passCtrl.text = cfg['password']!;
+-    if (cfg['pollInterval']?.isNotEmpty == true) _pollCtrl.text = cfg['pollInterval']!;
++    if (cfg['pollInterval']?.isNotEmpty == true)
++      _pollCtrl.text = cfg['pollInterval']!;
+     final urls = p.urlConfig;
+-    if (urls['loginUrl']?.isNotEmpty == true) _loginUrlCtrl.text = urls['loginUrl']!;
+-    if (urls['lotteryUrl']?.isNotEmpty == true) _lotteryUrlCtrl.text = urls['lotteryUrl']!;
+-    if (urls['lotteryResultUrl']?.isNotEmpty == true) _lotteryResultUrlCtrl.text = urls['lotteryResultUrl']!;
++    if (urls['loginUrl']?.isNotEmpty == true)
++      _loginUrlCtrl.text = urls['loginUrl']!;
++    if (urls['lotteryUrl']?.isNotEmpty == true)
++      _lotteryUrlCtrl.text = urls['lotteryUrl']!;
++    if (urls['lotteryResultUrl']?.isNotEmpty == true)
++      _lotteryResultUrlCtrl.text = urls['lotteryResultUrl']!;
+   }
+ 
+   @override
+@@ -102,12 +108,26 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+ 
+   Future<void> _testConnection(AppProvider p) async {
+     await _saveConfig(p);
+-    setState(() { _testing = true; _testError = null; _testSuccess = false; });
++    setState(() {
++      _testing = true;
++      _testError = null;
++      _testSuccess = false;
++    });
+     try {
+       final ok = await p.testImapConnection();
+-      setState(() { _testing = false; _testSuccess = ok; _testError = ok ? null : 'Kết nối thất bại. Kiểm tra host/port/password.'; });
++      setState(() {
++        _testing = false;
++        _testSuccess = ok;
++        _testError = ok
++            ? null
++            : 'Kết nối thất bại. Kiểm tra host/port/password.';
++      });
+     } catch (e) {
+-      setState(() { _testing = false; _testError = e.toString(); _testSuccess = false; });
++      setState(() {
++        _testing = false;
++        _testError = e.toString();
++        _testSuccess = false;
++      });
+     }
+   }
+ 
+@@ -118,10 +138,12 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+       await _saveConfig(p);
+       await p.startImap();
+       if (p.imapError != null && mounted) {
+-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+-          content: Text('Lỗi: ${p.imapError}'),
+-          backgroundColor: AppColors.error,
+-        ));
++        ScaffoldMessenger.of(context).showSnackBar(
++          SnackBar(
++            content: Text('Lỗi: ${p.imapError}'),
++            backgroundColor: AppColors.error,
++          ),
++        );
+       }
+     }
+   }
+@@ -131,29 +153,48 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+     final results = await p.fetchOtpNow();
+     setState(() => _fetching = false);
+     if (mounted) {
+-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+-        content: Text(results.isEmpty ? 'Không tìm thấy OTP mới' : '✅ Tìm thấy ${results.length} OTP'),
+-      ));
++      ScaffoldMessenger.of(context).showSnackBar(
++        SnackBar(
++          content: Text(
++            results.isEmpty
++                ? 'Không tìm thấy OTP mới'
++                : '✅ Tìm thấy ${results.length} OTP',
++          ),
++        ),
++      );
+     }
+   }
+ 
+   Future<void> _searchEmails(AppProvider p) async {
+     await _saveConfig(p);
+-    setState(() { _searching = true; _searchError = null; _searchResults = []; });
++    setState(() {
++      _searching = true;
++      _searchError = null;
++      _searchResults = [];
++    });
+     try {
+       final results = await p.searchEmails(
+         subjectKeyword: _searchSubjectCtrl.text.trim(),
+         bodyKeyword: _searchBodyCtrl.text.trim(),
+         from: _searchFrom,
+         to: _searchTo,
+-        maxMessages: 30,
++        maxMessages: 3,
+       );
+-      setState(() { _searching = false; _searchResults = results; });
++      setState(() {
++        _searching = false;
++        _searchResults = results;
++      });
+       if (results.isEmpty) {
+-        setState(() => _searchError = 'Không tìm thấy email nào trong khoảng thời gian này.');
++        setState(
++          () => _searchError =
++              'Không tìm thấy email nào trong khoảng thời gian này.',
++        );
+       }
+     } catch (e) {
+-      setState(() { _searching = false; _searchError = 'Lỗi: ${e.toString()}'; });
++      setState(() {
++        _searching = false;
++        _searchError = 'Lỗi: ${e.toString()}';
++      });
+     }
+   }
+ 
+@@ -184,8 +225,19 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+       ),
+     );
+     if (time == null) return;
+-    final dt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+-    setState(() { if (isFrom) _searchFrom = dt; else _searchTo = dt; });
++    final dt = DateTime(
++      date.year,
++      date.month,
++      date.day,
++      time.hour,
++      time.minute,
++    );
++    setState(() {
++      if (isFrom)
++        _searchFrom = dt;
++      else
++        _searchTo = dt;
++    });
+   }
+ 
+   // ─── RULE DIALOG ──────────────────────────────────────────────────────────
+@@ -194,7 +246,8 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+     FilterType type = existing?.type ?? FilterType.sender;
+     final patternCtrl = TextEditingController(text: existing?.pattern ?? '');
+     final extractCtrl = TextEditingController(
+-        text: existing?.extractPattern ?? r'【パスコード】\s*(\d{6})');
++      text: existing?.extractPattern ?? r'【パスコード】\s*(\d{6})',
++    );
+ 
+     showDialog(
+       context: context,
+@@ -214,16 +267,22 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                   dropdownColor: AppColors.surfaceVariant,
+                   style: const TextStyle(color: Colors.white),
+                   decoration: const InputDecoration(labelText: 'Loại'),
+-                  items: FilterType.values.map((t) => DropdownMenuItem(
+-                    value: t,
+-                    child: Text(const {
+-                      FilterType.sender:    'Người gửi',
+-                      FilterType.subject:   'Tiêu đề',
+-                      FilterType.recipient: 'Người nhận',
+-                      FilterType.body:      'Nội dung email',
+-                      FilterType.regex:     'Regex',
+-                    }[t]!),
+-                  )).toList(),
++                  items: FilterType.values
++                      .map(
++                        (t) => DropdownMenuItem(
++                          value: t,
++                          child: Text(
++                            const {
++                              FilterType.sender: 'Người gửi',
++                              FilterType.subject: 'Tiêu đề',
++                              FilterType.recipient: 'Người nhận',
++                              FilterType.body: 'Nội dung email',
++                              FilterType.regex: 'Regex',
++                            }[t]!,
++                          ),
++                        ),
++                      )
++                      .toList(),
+                   onChanged: (v) => setS(() => type = v!),
+                 ),
+                 const SizedBox(height: 12),
+@@ -232,15 +291,21 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                   style: const TextStyle(color: Colors.white),
+                   decoration: InputDecoration(
+                     labelText: 'Pattern',
+-                    hintText: {
+-                      FilterType.sender:    'pokemoncenter-online.com',
+-                      FilterType.subject:   'ログイン用パスコード',
+-                      FilterType.recipient: 'abc@gmail.com',
+-                      FilterType.body:      'パスコード',
+-                      FilterType.regex:     r'\b(\d{6})\b',
+-                    }[type] ?? 'pokemoncenter-online.com',
+-                    helperText: 'Chuỗi cần khớp (người gửi / tiêu đề / người nhận / nội dung / regex)',
+-                    helperStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
++                    hintText:
++                        {
++                          FilterType.sender: 'pokemoncenter-online.com',
++                          FilterType.subject: 'ログイン用パスコード',
++                          FilterType.recipient: 'abc@gmail.com',
++                          FilterType.body: 'パスコード',
++                          FilterType.regex: r'\b(\d{6})\b',
++                        }[type] ??
++                        'pokemoncenter-online.com',
++                    helperText:
++                        'Chuỗi cần khớp (người gửi / tiêu đề / người nhận / nội dung / regex)',
++                    helperStyle: const TextStyle(
++                      color: AppColors.textSecondary,
++                      fontSize: 11,
++                    ),
+                   ),
+                 ),
+                 const SizedBox(height: 12),
+@@ -251,10 +316,18 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                   decoration: InputDecoration(
+                     labelText: 'Regex trích xuất OTP',
+                     helperMaxLines: 2,
+-                    helperText: r'Nhóm (\d{6}) là OTP. Ví dụ: 【パスコード】\s*(\d{6})',
+-                    helperStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
++                    helperText:
++                        r'Nhóm (\d{6}) là OTP. Ví dụ: 【パスコード】\s*(\d{6})',
++                    helperStyle: const TextStyle(
++                      color: AppColors.textSecondary,
++                      fontSize: 11,
++                    ),
+                     suffixIcon: IconButton(
+-                      icon: const Icon(Icons.restore, color: AppColors.textSecondary, size: 18),
++                      icon: const Icon(
++                        Icons.restore,
++                        color: AppColors.textSecondary,
++                        size: 18,
++                      ),
+                       tooltip: 'Mặc định',
+                       onPressed: () => extractCtrl.text = r'【パスコード】\s*(\d{6})',
+                     ),
+@@ -264,17 +337,22 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+             ),
+           ),
+           actions: [
+-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
++            TextButton(
++              onPressed: () => Navigator.pop(context),
++              child: const Text('Hủy'),
++            ),
+             ElevatedButton(
+               onPressed: () {
+                 if (patternCtrl.text.trim().isEmpty) return;
+                 final rules = List<FilterRule>.from(p.filterRules);
+                 if (existing == null) {
+-                  rules.add(FilterRule(
+-                    type: type,
+-                    pattern: patternCtrl.text.trim(),
+-                    extractPattern: extractCtrl.text.trim(),
+-                  ));
++                  rules.add(
++                    FilterRule(
++                      type: type,
++                      pattern: patternCtrl.text.trim(),
++                      extractPattern: extractCtrl.text.trim(),
++                    ),
++                  );
+                 } else {
+                   final idx = rules.indexWhere((r) => r.id == existing.id);
+                   if (idx >= 0) {
+@@ -304,21 +382,30 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+     return Scaffold(
+       backgroundColor: AppColors.surface,
+       appBar: AppBar(
+-        title: Row(children: [
+-          const Text('OTP Monitor'),
+-          if (p.imapRunning) ...[
+-            const SizedBox(width: 8),
+-            Container(
+-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+-              decoration: BoxDecoration(
+-                color: AppColors.done.withAlpha(30),
+-                borderRadius: BorderRadius.circular(8),
+-                border: Border.all(color: AppColors.done, width: 1),
++        title: Row(
++          children: [
++            const Text('OTP Monitor'),
++            if (p.imapRunning) ...[
++              const SizedBox(width: 8),
++              Container(
++                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
++                decoration: BoxDecoration(
++                  color: AppColors.done.withAlpha(30),
++                  borderRadius: BorderRadius.circular(8),
++                  border: Border.all(color: AppColors.done, width: 1),
++                ),
++                child: const Text(
++                  'LIVE',
++                  style: TextStyle(
++                    color: AppColors.done,
++                    fontSize: 11,
++                    fontWeight: FontWeight.bold,
++                  ),
++                ),
+               ),
+-              child: const Text('LIVE', style: TextStyle(color: AppColors.done, fontSize: 11, fontWeight: FontWeight.bold)),
+-            ),
++            ],
+           ],
+-        ]),
++        ),
+         bottom: TabBar(
+           controller: _tabCtrl,
+           indicatorColor: AppColors.primary,
+@@ -356,26 +443,28 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+           _sectionCard(
+             title: 'Kết nối IMAP',
+             children: [
+-              Row(children: [
+-                Expanded(
+-                  flex: 3,
+-                  child: TextField(
+-                    controller: _hostCtrl,
+-                    style: const TextStyle(color: Colors.white),
+-                    decoration: const InputDecoration(labelText: 'Host'),
++              Row(
++                children: [
++                  Expanded(
++                    flex: 3,
++                    child: TextField(
++                      controller: _hostCtrl,
++                      style: const TextStyle(color: Colors.white),
++                      decoration: const InputDecoration(labelText: 'Host'),
++                    ),
+                   ),
+-                ),
+-                const SizedBox(width: 8),
+-                SizedBox(
+-                  width: 70,
+-                  child: TextField(
+-                    controller: _portCtrl,
+-                    style: const TextStyle(color: Colors.white),
+-                    keyboardType: TextInputType.number,
+-                    decoration: const InputDecoration(labelText: 'Port'),
++                  const SizedBox(width: 8),
++                  SizedBox(
++                    width: 70,
++                    child: TextField(
++                      controller: _portCtrl,
++                      style: const TextStyle(color: Colors.white),
++                      keyboardType: TextInputType.number,
++                      decoration: const InputDecoration(labelText: 'Port'),
++                    ),
+                   ),
+-                ),
+-              ]),
++                ],
++              ),
+               const SizedBox(height: 12),
+               TextField(
+                 controller: _userCtrl,
+@@ -383,7 +472,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 keyboardType: TextInputType.emailAddress,
+                 decoration: const InputDecoration(
+                   labelText: 'Email',
+-                  prefixIcon: Icon(Icons.email_outlined, color: AppColors.textSecondary),
++                  prefixIcon: Icon(
++                    Icons.email_outlined,
++                    color: AppColors.textSecondary,
++                  ),
+                 ),
+               ),
+               const SizedBox(height: 12),
+@@ -393,7 +485,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 style: const TextStyle(color: Colors.white),
+                 decoration: const InputDecoration(
+                   labelText: 'App Password (Gmail: 16 ký tự, space OK)',
+-                  prefixIcon: Icon(Icons.lock_outline, color: AppColors.textSecondary),
++                  prefixIcon: Icon(
++                    Icons.lock_outline,
++                    color: AppColors.textSecondary,
++                  ),
+                 ),
+               ),
+               const SizedBox(height: 12),
+@@ -403,7 +498,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 keyboardType: TextInputType.number,
+                 decoration: const InputDecoration(
+                   labelText: 'Kiểm tra mỗi (giây)',
+-                  prefixIcon: Icon(Icons.timer_outlined, color: AppColors.textSecondary),
++                  prefixIcon: Icon(
++                    Icons.timer_outlined,
++                    color: AppColors.textSecondary,
++                  ),
+                 ),
+               ),
+               const SizedBox(height: 16),
+@@ -422,73 +520,109 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                       color: _testSuccess ? AppColors.done : AppColors.error,
+                     ),
+                   ),
+-                  child: Row(children: [
+-                    Icon(
+-                      _testSuccess ? Icons.check_circle : Icons.error_outline,
+-                      color: _testSuccess ? AppColors.done : AppColors.error,
+-                      size: 18,
+-                    ),
+-                    const SizedBox(width: 8),
+-                    Expanded(
+-                      child: Text(
+-                        _testSuccess ? '✅ Kết nối thành công!' : _testError!,
+-                        style: TextStyle(
+-                          color: _testSuccess ? AppColors.done : AppColors.error,
+-                          fontSize: 13,
++                  child: Row(
++                    children: [
++                      Icon(
++                        _testSuccess ? Icons.check_circle : Icons.error_outline,
++                        color: _testSuccess ? AppColors.done : AppColors.error,
++                        size: 18,
++                      ),
++                      const SizedBox(width: 8),
++                      Expanded(
++                        child: Text(
++                          _testSuccess ? '✅ Kết nối thành công!' : _testError!,
++                          style: TextStyle(
++                            color: _testSuccess
++                                ? AppColors.done
++                                : AppColors.error,
++                            fontSize: 13,
++                          ),
+                         ),
+                       ),
+-                    ),
+-                  ]),
++                    ],
++                  ),
+                 ),
+ 
+-              Row(children: [
+-                Expanded(
+-                  child: OutlinedButton.icon(
+-                    onPressed: _testing ? null : () => _testConnection(p),
+-                    icon: _testing
+-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+-                        : const Icon(Icons.check_circle_outline, size: 16),
+-                    label: Text(_testing ? 'Đang test...' : 'Test kết nối'),
+-                    style: OutlinedButton.styleFrom(
+-                      foregroundColor: AppColors.textPrimary,
+-                      side: const BorderSide(color: AppColors.divider),
++              Row(
++                children: [
++                  Expanded(
++                    child: OutlinedButton.icon(
++                      onPressed: _testing ? null : () => _testConnection(p),
++                      icon: _testing
++                          ? const SizedBox(
++                              width: 14,
++                              height: 14,
++                              child: CircularProgressIndicator(strokeWidth: 2),
++                            )
++                          : const Icon(Icons.check_circle_outline, size: 16),
++                      label: Text(_testing ? 'Đang test...' : 'Test kết nối'),
++                      style: OutlinedButton.styleFrom(
++                        foregroundColor: AppColors.textPrimary,
++                        side: const BorderSide(color: AppColors.divider),
++                      ),
+                     ),
+                   ),
+-                ),
+-                const SizedBox(width: 8),
+-                Expanded(
+-                  child: ElevatedButton.icon(
+-                    onPressed: (p.imapStarting || p.imapStopping) ? null : () => _toggleImap(p),
+-                    icon: (p.imapStarting || p.imapStopping)
+-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+-                        : Icon(p.imapRunning ? Icons.stop : Icons.play_arrow, size: 16),
+-                    label: Text(
+-                      p.imapStarting ? 'Đang kết nối...'
+-                          : p.imapStopping ? 'Đang dừng...'
+-                          : p.imapRunning ? 'Dừng' : 'Bắt đầu',
+-                    ),
+-                    style: ElevatedButton.styleFrom(
+-                      backgroundColor: p.imapRunning ? AppColors.error : AppColors.done,
++                  const SizedBox(width: 8),
++                  Expanded(
++                    child: ElevatedButton.icon(
++                      onPressed: (p.imapStarting || p.imapStopping)
++                          ? null
++                          : () => _toggleImap(p),
++                      icon: (p.imapStarting || p.imapStopping)
++                          ? const SizedBox(
++                              width: 14,
++                              height: 14,
++                              child: CircularProgressIndicator(
++                                strokeWidth: 2,
++                                color: Colors.white,
++                              ),
++                            )
++                          : Icon(
++                              p.imapRunning ? Icons.stop : Icons.play_arrow,
++                              size: 16,
++                            ),
++                      label: Text(
++                        p.imapStarting
++                            ? 'Đang kết nối...'
++                            : p.imapStopping
++                            ? 'Đang dừng...'
++                            : p.imapRunning
++                            ? 'Dừng'
++                            : 'Bắt đầu',
++                      ),
++                      style: ElevatedButton.styleFrom(
++                        backgroundColor: p.imapRunning
++                            ? AppColors.error
++                            : AppColors.done,
++                      ),
+                     ),
+                   ),
+-                ),
+-              ]),
++                ],
++              ),
+             ],
+           ),
+ 
+           const SizedBox(height: 16),
+ 
+           // Filter Rules
+-          Row(children: [
+-            const Text('Quy tắc lọc OTP',
+-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+-            const Spacer(),
+-            TextButton.icon(
+-              onPressed: () => _showRuleDialog(p),
+-              icon: const Icon(Icons.add, size: 16),
+-              label: const Text('Thêm'),
+-            ),
+-          ]),
++          Row(
++            children: [
++              const Text(
++                'Quy tắc lọc OTP',
++                style: TextStyle(
++                  color: Colors.white,
++                  fontWeight: FontWeight.bold,
++                  fontSize: 15,
++                ),
++              ),
++              const Spacer(),
++              TextButton.icon(
++                onPressed: () => _showRuleDialog(p),
++                icon: const Icon(Icons.add, size: 16),
++                label: const Text('Thêm'),
++              ),
++            ],
++          ),
+           const SizedBox(height: 4),
+           Container(
+             margin: const EdgeInsets.only(bottom: 12),
+@@ -508,8 +642,13 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+             const Center(
+               child: Padding(
+                 padding: EdgeInsets.all(16),
+-                child: Text('Chưa có quy tắc nào. Dùng fallback 6-digit.',
+-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
++                child: Text(
++                  'Chưa có quy tắc nào. Dùng fallback 6-digit.',
++                  style: TextStyle(
++                    color: AppColors.textSecondary,
++                    fontSize: 13,
++                  ),
++                ),
+               ),
+             ),
+ 
+@@ -524,7 +663,11 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 style: const TextStyle(color: Colors.white, fontSize: 13),
+                 decoration: const InputDecoration(
+                   labelText: 'Login URL',
+-                  prefixIcon: Icon(Icons.login, color: AppColors.primary, size: 18),
++                  prefixIcon: Icon(
++                    Icons.login,
++                    color: AppColors.primary,
++                    size: 18,
++                  ),
+                 ),
+               ),
+               const SizedBox(height: 12),
+@@ -534,7 +677,11 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 decoration: const InputDecoration(
+                   labelText: 'Lottery URL',
+                   hintText: 'https://...',
+-                  prefixIcon: Icon(Icons.casino_outlined, color: AppColors.secondary, size: 18),
++                  prefixIcon: Icon(
++                    Icons.casino_outlined,
++                    color: AppColors.secondary,
++                    size: 18,
++                  ),
+                 ),
+               ),
+               const SizedBox(height: 12),
+@@ -544,7 +691,11 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 decoration: const InputDecoration(
+                   labelText: 'Lottery Result URL',
+                   hintText: 'https://...',
+-                  prefixIcon: Icon(Icons.emoji_events_outlined, color: AppColors.done, size: 18),
++                  prefixIcon: Icon(
++                    Icons.emoji_events_outlined,
++                    color: AppColors.done,
++                    size: 18,
++                  ),
+                 ),
+               ),
+               const SizedBox(height: 16),
+@@ -555,13 +706,18 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                     await _saveConfig(p);
+                     if (mounted) {
+                       ScaffoldMessenger.of(context).showSnackBar(
+-                        const SnackBar(content: Text('✅ Đã lưu cài đặt'), duration: Duration(seconds: 1)),
++                        const SnackBar(
++                          content: Text('✅ Đã lưu cài đặt'),
++                          duration: Duration(seconds: 1),
++                        ),
+                       );
+                     }
+                   },
+                   icon: const Icon(Icons.save_outlined, size: 16),
+                   label: const Text('Lưu đường dẫn'),
+-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
++                  style: ElevatedButton.styleFrom(
++                    backgroundColor: AppColors.primary,
++                  ),
+                 ),
+               ),
+             ],
+@@ -581,18 +737,31 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+             color: AppColors.secondary.withAlpha(50),
+             borderRadius: BorderRadius.circular(6),
+           ),
+-          child: Text(rule.typeLabel,
+-              style: const TextStyle(color: AppColors.secondary, fontSize: 11, fontWeight: FontWeight.bold)),
++          child: Text(
++            rule.typeLabel,
++            style: const TextStyle(
++              color: AppColors.secondary,
++              fontSize: 11,
++              fontWeight: FontWeight.bold,
++            ),
++          ),
++        ),
++        title: Text(
++          rule.pattern,
++          style: TextStyle(
++            color: rule.enabled ? Colors.white : AppColors.textSecondary,
++            fontSize: 14,
++            decoration: rule.enabled ? null : TextDecoration.lineThrough,
++          ),
+         ),
+-        title: Text(rule.pattern,
+-            style: TextStyle(
+-              color: rule.enabled ? Colors.white : AppColors.textSecondary,
+-              fontSize: 14,
+-              decoration: rule.enabled ? null : TextDecoration.lineThrough,
+-            )),
+         subtitle: rule.extractPattern?.isNotEmpty == true
+-            ? Text('Extract: ${rule.extractPattern}',
+-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 11))
++            ? Text(
++                'Extract: ${rule.extractPattern}',
++                style: const TextStyle(
++                  color: AppColors.textSecondary,
++                  fontSize: 11,
++                ),
++              )
+             : null,
+         trailing: Row(
+           mainAxisSize: MainAxisSize.min,
+@@ -608,11 +777,19 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+               },
+             ),
+             IconButton(
+-              icon: const Icon(Icons.edit_outlined, color: AppColors.secondary, size: 20),
++              icon: const Icon(
++                Icons.edit_outlined,
++                color: AppColors.secondary,
++                size: 20,
++              ),
+               onPressed: () => _showRuleDialog(p, existing: rule),
+             ),
+             IconButton(
+-              icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 20),
++              icon: const Icon(
++                Icons.delete_outline,
++                color: AppColors.error,
++                size: 20,
++              ),
+               onPressed: () {
+                 final rules = List<FilterRule>.from(p.filterRules)
+                   ..removeWhere((r) => r.id == rule.id);
+@@ -642,7 +819,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 decoration: const InputDecoration(
+                   labelText: 'Từ khoá tiêu đề',
+                   hintText: 'ポケモンセンター hoặc パスコード',
+-                  prefixIcon: Icon(Icons.subject, color: AppColors.textSecondary),
++                  prefixIcon: Icon(
++                    Icons.subject,
++                    color: AppColors.textSecondary,
++                  ),
+                 ),
+               ),
+               const SizedBox(height: 12),
+@@ -652,7 +832,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 decoration: const InputDecoration(
+                   labelText: 'Từ khoá trong nội dung email',
+                   hintText: 'Ví dụ: confirmation, verify, code',
+-                  prefixIcon: Icon(Icons.mail_outline, color: AppColors.textSecondary),
++                  prefixIcon: Icon(
++                    Icons.mail_outline,
++                    color: AppColors.textSecondary,
++                  ),
+                 ),
+               ),
+               const SizedBox(height: 12),
+@@ -667,12 +850,14 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+               ElevatedButton.icon(
+                 onPressed: _searching ? null : () => _searchEmails(p),
+                 icon: _searching
+-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
++                    ? const SizedBox(
++                        width: 16,
++                        height: 16,
++                        child: CircularProgressIndicator(strokeWidth: 2),
++                      )
+                     : const Icon(Icons.search, size: 16),
+                 label: Text(_searching ? 'Đang tìm...' : 'Tìm email'),
+-                style: ElevatedButton.styleFrom(
+-                  minimumSize: const Size(0, 48),
+-                ),
++                style: ElevatedButton.styleFrom(minimumSize: const Size(0, 48)),
+               ),
+             ],
+           ),
+@@ -687,13 +872,20 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                 borderRadius: BorderRadius.circular(8),
+                 border: Border.all(color: AppColors.error),
+               ),
+-              child: Text(_searchError!,
+-                  style: const TextStyle(color: AppColors.error, fontSize: 13)),
++              child: Text(
++                _searchError!,
++                style: const TextStyle(color: AppColors.error, fontSize: 13),
++              ),
+             ),
+ 
+           if (_searchResults.isNotEmpty) ...[
+-            Text('Tìm thấy ${_searchResults.length} email:',
+-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
++            Text(
++              'Tìm thấy ${_searchResults.length} email:',
++              style: const TextStyle(
++                color: AppColors.textSecondary,
++                fontSize: 13,
++              ),
++            ),
+             const SizedBox(height: 8),
+             ..._searchResults.map((r) => _buildSearchResultTile(r)),
+           ],
+@@ -712,16 +904,34 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+           borderRadius: BorderRadius.circular(10),
+           border: Border.all(color: AppColors.divider),
+         ),
+-        child: Row(children: [
+-          const Icon(Icons.calendar_today, color: AppColors.textSecondary, size: 16),
+-          const SizedBox(width: 10),
+-          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+-          const SizedBox(width: 8),
+-          Text(_dateFmt.format(dt),
+-              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+-          const Spacer(),
+-          const Icon(Icons.edit, color: AppColors.textSecondary, size: 16),
+-        ]),
++        child: Row(
++          children: [
++            const Icon(
++              Icons.calendar_today,
++              color: AppColors.textSecondary,
++              size: 16,
++            ),
++            const SizedBox(width: 10),
++            Text(
++              label,
++              style: const TextStyle(
++                color: AppColors.textSecondary,
++                fontSize: 13,
++              ),
++            ),
++            const SizedBox(width: 8),
++            Text(
++              _dateFmt.format(dt),
++              style: const TextStyle(
++                color: Colors.white,
++                fontSize: 14,
++                fontWeight: FontWeight.w500,
++              ),
++            ),
++            const Spacer(),
++            const Icon(Icons.edit, color: AppColors.textSecondary, size: 16),
++          ],
++        ),
+       ),
+     );
+   }
+@@ -744,34 +954,49 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+             size: 20,
+           ),
+         ),
+-        title: Row(children: [
+-          Expanded(
+-            child: Text(r.subject,
++        title: Row(
++          children: [
++            Expanded(
++              child: Text(
++                r.subject,
+                 style: const TextStyle(color: Colors.white, fontSize: 13),
+-                overflow: TextOverflow.ellipsis),
+-          ),
+-          if (hasOtp)
+-            GestureDetector(
+-              onTap: () {
+-                Clipboard.setData(ClipboardData(text: r.otpFound!));
+-                ScaffoldMessenger.of(context).showSnackBar(
+-                  const SnackBar(content: Text('Copied OTP!'), duration: Duration(seconds: 1)),
+-                );
+-              },
+-              child: Container(
+-                margin: const EdgeInsets.only(left: 8),
+-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+-                decoration: BoxDecoration(
+-                  color: AppColors.done,
+-                  borderRadius: BorderRadius.circular(6),
+-                ),
+-                child: Text(r.otpFound!,
+-                    style: const TextStyle(
+-                        color: Colors.white, fontWeight: FontWeight.bold,
+-                        fontSize: 14, letterSpacing: 2)),
++                overflow: TextOverflow.ellipsis,
+               ),
+             ),
+-        ]),
++            if (hasOtp)
++              GestureDetector(
++                onTap: () {
++                  Clipboard.setData(ClipboardData(text: r.otpFound!));
++                  ScaffoldMessenger.of(context).showSnackBar(
++                    const SnackBar(
++                      content: Text('Copied OTP!'),
++                      duration: Duration(seconds: 1),
++                    ),
++                  );
++                },
++                child: Container(
++                  margin: const EdgeInsets.only(left: 8),
++                  padding: const EdgeInsets.symmetric(
++                    horizontal: 8,
++                    vertical: 2,
++                  ),
++                  decoration: BoxDecoration(
++                    color: AppColors.done,
++                    borderRadius: BorderRadius.circular(6),
++                  ),
++                  child: Text(
++                    r.otpFound!,
++                    style: const TextStyle(
++                      color: Colors.white,
++                      fontWeight: FontWeight.bold,
++                      fontSize: 14,
++                      letterSpacing: 2,
++                    ),
++                  ),
++                ),
++              ),
++          ],
++        ),
+         subtitle: Text(
+           '${r.sender} · ${_timeFmt.format(r.date)}',
+           style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+@@ -783,7 +1008,11 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+             width: double.infinity,
+             child: Text(
+               r.body,
+-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace'),
++              style: const TextStyle(
++                color: AppColors.textSecondary,
++                fontSize: 12,
++                fontFamily: 'monospace',
++              ),
+             ),
+           ),
+         ],
+@@ -798,58 +1027,85 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+       children: [
+         Padding(
+           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+-          child: Row(children: [
+-            Container(
+-              width: 8,
+-              height: 8,
+-              decoration: BoxDecoration(
+-                color: p.imapRunning ? AppColors.done : AppColors.textSecondary,
+-                shape: BoxShape.circle,
+-              ),
+-            ),
+-            const SizedBox(width: 8),
+-            Expanded(
+-              child: Text(
+-                p.imapRunning
+-                    ? 'Đang theo dõi · ${p.otpHistory.length} OTPs'
+-                    : 'Chưa kết nối',
+-                style: TextStyle(
+-                  color: p.imapRunning ? AppColors.done : AppColors.textSecondary,
+-                  fontSize: 13,
++          child: Row(
++            children: [
++              Container(
++                width: 8,
++                height: 8,
++                decoration: BoxDecoration(
++                  color: p.imapRunning
++                      ? AppColors.done
++                      : AppColors.textSecondary,
++                  shape: BoxShape.circle,
+                 ),
+               ),
+-            ),
+-            ElevatedButton.icon(
+-              onPressed: _fetching ? null : () => _fetchNow(p),
+-              icon: _fetching
+-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+-                  : const Icon(Icons.refresh, size: 16),
+-              label: Text(_fetching ? '...' : 'Lấy ngay'),
+-              style: ElevatedButton.styleFrom(
+-                backgroundColor: AppColors.card,
+-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+-                minimumSize: Size.zero,
++              const SizedBox(width: 8),
++              Expanded(
++                child: Text(
++                  p.imapRunning
++                      ? 'Đang theo dõi · ${p.otpHistory.length} OTPs'
++                      : 'Chưa kết nối',
++                  style: TextStyle(
++                    color: p.imapRunning
++                        ? AppColors.done
++                        : AppColors.textSecondary,
++                    fontSize: 13,
++                  ),
++                ),
+               ),
+-            ),
+-            if (p.otpHistory.isNotEmpty) ...[
+-              const SizedBox(width: 6),
+-              IconButton(
+-                icon: const Icon(Icons.clear_all, color: AppColors.textSecondary, size: 20),
+-                tooltip: 'Xóa lịch sử',
+-                onPressed: () => p.clearOtpHistory(),
++              ElevatedButton.icon(
++                onPressed: _fetching ? null : () => _fetchNow(p),
++                icon: _fetching
++                    ? const SizedBox(
++                        width: 14,
++                        height: 14,
++                        child: CircularProgressIndicator(strokeWidth: 2),
++                      )
++                    : const Icon(Icons.refresh, size: 16),
++                label: Text(_fetching ? '...' : 'Lấy ngay'),
++                style: ElevatedButton.styleFrom(
++                  backgroundColor: AppColors.card,
++                  padding: const EdgeInsets.symmetric(
++                    horizontal: 12,
++                    vertical: 8,
++                  ),
++                  minimumSize: Size.zero,
++                ),
+               ),
++              if (p.otpHistory.isNotEmpty) ...[
++                const SizedBox(width: 6),
++                IconButton(
++                  icon: const Icon(
++                    Icons.clear_all,
++                    color: AppColors.textSecondary,
++                    size: 20,
++                  ),
++                  tooltip: 'Xóa lịch sử',
++                  onPressed: () => p.clearOtpHistory(),
++                ),
++              ],
+             ],
+-          ]),
++          ),
+         ),
+         const Divider(height: 1),
+         Expanded(
+           child: p.otpHistory.isEmpty
+               ? const Center(
+-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+-                    Icon(Icons.sms_outlined, color: AppColors.textSecondary, size: 48),
+-                    SizedBox(height: 8),
+-                    Text('Chưa có OTP nào', style: TextStyle(color: AppColors.textSecondary)),
+-                  ]),
++                  child: Column(
++                    mainAxisSize: MainAxisSize.min,
++                    children: [
++                      Icon(
++                        Icons.sms_outlined,
++                        color: AppColors.textSecondary,
++                        size: 48,
++                      ),
++                      SizedBox(height: 8),
++                      Text(
++                        'Chưa có OTP nào',
++                        style: TextStyle(color: AppColors.textSecondary),
++                      ),
++                    ],
++                  ),
+                 )
+               : ListView.builder(
+                   padding: const EdgeInsets.all(8),
+@@ -873,42 +1129,85 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+             borderRadius: BorderRadius.circular(8),
+             border: otp.isRecent ? Border.all(color: AppColors.done) : null,
+           ),
+-          child: Icon(Icons.sms,
+-              color: otp.isRecent ? AppColors.done : AppColors.textSecondary, size: 22),
++          child: Icon(
++            Icons.sms,
++            color: otp.isRecent ? AppColors.done : AppColors.textSecondary,
++            size: 22,
++          ),
+         ),
+-        title: Row(children: [
+-          Text(otp.code,
++        title: Row(
++          children: [
++            Text(
++              otp.code,
+               style: const TextStyle(
+-                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 22, letterSpacing: 3)),
+-          if (otp.isRecent) ...[
+-            const SizedBox(width: 8),
+-            Container(
+-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+-              decoration: BoxDecoration(color: AppColors.done, borderRadius: BorderRadius.circular(4)),
+-              child: const Text('MỚI', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
++                color: Colors.white,
++                fontWeight: FontWeight.bold,
++                fontSize: 22,
++                letterSpacing: 3,
++              ),
+             ),
++            if (otp.isRecent) ...[
++              const SizedBox(width: 8),
++              Container(
++                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
++                decoration: BoxDecoration(
++                  color: AppColors.done,
++                  borderRadius: BorderRadius.circular(4),
++                ),
++                child: const Text(
++                  'MỚI',
++                  style: TextStyle(
++                    color: Colors.white,
++                    fontSize: 10,
++                    fontWeight: FontWeight.bold,
++                  ),
++                ),
++              ),
++            ],
+           ],
+-        ]),
++        ),
+         subtitle: Column(
+           crossAxisAlignment: CrossAxisAlignment.start,
+           children: [
+             if (otp.recipient != null)
+               Text(
+                 'To: ${otp.recipient!}',
+-                style: const TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w500),
++                style: const TextStyle(
++                  color: AppColors.primary,
++                  fontSize: 11,
++                  fontWeight: FontWeight.w500,
++                ),
+               ),
+             if (otp.sender != null)
+-              Text(otp.sender!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+-            Text(_timeFmt.format(otp.timestamp),
+-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
++              Text(
++                otp.sender!,
++                style: const TextStyle(
++                  color: AppColors.textSecondary,
++                  fontSize: 11,
++                ),
++              ),
++            Text(
++              _timeFmt.format(otp.timestamp),
++              style: const TextStyle(
++                color: AppColors.textSecondary,
++                fontSize: 11,
++              ),
++            ),
+           ],
+         ),
+         trailing: IconButton(
+-          icon: const Icon(Icons.copy, color: AppColors.textSecondary, size: 20),
++          icon: const Icon(
++            Icons.copy,
++            color: AppColors.textSecondary,
++            size: 20,
++          ),
+           onPressed: () {
+             Clipboard.setData(ClipboardData(text: otp.code));
+             ScaffoldMessenger.of(context).showSnackBar(
+-              const SnackBar(content: Text('Đã copy OTP!'), duration: Duration(seconds: 1)),
++              const SnackBar(
++                content: Text('Đã copy OTP!'),
++                duration: Duration(seconds: 1),
++              ),
+             );
+           },
+         ),
+@@ -932,7 +1231,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                   Expanded(
+                     child: Text(
+                       '${debug.logs.length} log messages',
+-                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
++                      style: const TextStyle(
++                        color: AppColors.textSecondary,
++                        fontSize: 13,
++                      ),
+                     ),
+                   ),
+                   ElevatedButton.icon(
+@@ -941,7 +1243,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                     label: const Text('Clear'),
+                     style: ElevatedButton.styleFrom(
+                       backgroundColor: AppColors.card,
+-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
++                      padding: const EdgeInsets.symmetric(
++                        horizontal: 12,
++                        vertical: 6,
++                      ),
+                       minimumSize: Size.zero,
+                     ),
+                   ),
+@@ -964,8 +1269,14 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                       itemCount: debug.logs.length,
+                       itemBuilder: (_, i) {
+                         final log = debug.logs[i];
+-                        final isError = log.contains('ERROR') || log.contains('failed') || log.contains('lỗi');
+-                        final isSuccess = log.contains('✓') || log.contains('Success') || log.contains('OK');
++                        final isError =
++                            log.contains('ERROR') ||
++                            log.contains('failed') ||
++                            log.contains('lỗi');
++                        final isSuccess =
++                            log.contains('✓') ||
++                            log.contains('Success') ||
++                            log.contains('OK');
+                         return Container(
+                           margin: const EdgeInsets.only(bottom: 6),
+                           padding: const EdgeInsets.all(10),
+@@ -973,15 +1284,15 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                             color: isError
+                                 ? AppColors.error.withAlpha(10)
+                                 : isSuccess
+-                                    ? AppColors.done.withAlpha(10)
+-                                    : AppColors.card,
++                                ? AppColors.done.withAlpha(10)
++                                : AppColors.card,
+                             borderRadius: BorderRadius.circular(6),
+                             border: Border.all(
+                               color: isError
+                                   ? AppColors.error.withAlpha(50)
+                                   : isSuccess
+-                                      ? AppColors.done.withAlpha(50)
+-                                      : AppColors.divider,
++                                  ? AppColors.done.withAlpha(50)
++                                  : AppColors.divider,
+                             ),
+                           ),
+                           child: SelectableText(
+@@ -990,8 +1301,8 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+                               color: isError
+                                   ? AppColors.error
+                                   : isSuccess
+-                                      ? AppColors.done
+-                                      : Colors.white,
++                                  ? AppColors.done
++                                  : Colors.white,
+                               fontSize: 12,
+                               fontFamily: 'monospace',
+                             ),
+@@ -1015,8 +1326,14 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
+         child: Column(
+           crossAxisAlignment: CrossAxisAlignment.start,
+           children: [
+-            Text(title, style: const TextStyle(
+-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
++            Text(
++              title,
++              style: const TextStyle(
++                color: Colors.white,
++                fontWeight: FontWeight.bold,
++                fontSize: 15,
++              ),
++            ),
+             const SizedBox(height: 16),
+             ...children,
+           ],
+diff --git a/lib/services/fast_imap_client.dart b/lib/services/fast_imap_client.dart
+index b9a1426..4c16f92 100644
+--- a/lib/services/fast_imap_client.dart
++++ b/lib/services/fast_imap_client.dart
+@@ -62,6 +62,8 @@ class FastImapException implements Exception {
+ }
+ 
+ class FastImapClient {
++  static const _defaultBodyBytes = 64 * 1024;
++
+   final void Function(String line)? debugLog;
+ 
+   Socket? _socket;
+@@ -149,10 +151,14 @@ class FastImapClient {
+     return uids;
+   }
+ 
+-  Future<List<FastImapMessage>> fetchMessagesByUid(List<int> uids) async {
++  Future<List<FastImapMessage>> fetchMessagesByUid(
++    List<int> uids, {
++    int maxBodyBytes = _defaultBodyBytes,
++  }) async {
+     if (uids.isEmpty) return const [];
+     final lines = await _command(
+-      'UID FETCH ${_uidSet(uids)} (UID INTERNALDATE BODY.PEEK[])',
++      'UID FETCH ${_uidSet(uids)} '
++      '(UID INTERNALDATE BODY.PEEK[]<0.$maxBodyBytes>)',
+       timeout: const Duration(seconds: 20),
+     );
+     return _parseFetchMessages(lines);
+@@ -160,6 +166,7 @@ class FastImapClient {
+ 
+   Future<List<FastImapMessage>> fetchRecentMessages({
+     int maxMessages = 30,
++    int maxBodyBytes = _defaultBodyBytes,
+   }) async {
+     final state = await selectInbox();
+     if (state.exists <= 0) return const [];
+@@ -168,7 +175,7 @@ class FastImapClient {
+     final start = state.exists - count + 1;
+     final rangeStart = start < 1 ? 1 : start;
+     final lines = await _command(
+-      'FETCH $rangeStart:* (UID INTERNALDATE BODY.PEEK[])',
++      'FETCH $rangeStart:* (UID INTERNALDATE BODY.PEEK[]<0.$maxBodyBytes>)',
+       timeout: const Duration(seconds: 25),
+     );
+     final messages = _parseFetchMessages(lines);
+diff --git a/lib/services/imap_service.dart b/lib/services/imap_service.dart
+index 987e3d7..62ed011 100644
+--- a/lib/services/imap_service.dart
++++ b/lib/services/imap_service.dart
+@@ -54,9 +54,9 @@ class EmailSearchResult {
+ }
+ 
+ class ImapService {
+-  static const _maxOtpMessageAge = Duration(minutes: 15);
+-  static const _startupRecentMessages = 12;
+-  static const _searchRecentFloor = 30;
++  static const _maxOtpMessageAge = Duration(minutes: 2);
++  static const _startupRecentMessages = 3;
++  static const _searchRecentFloor = 3;
+ 
+   FastImapClient? _client;
+   FastImapClient? _idleClient;
+@@ -68,6 +68,7 @@ class ImapService {
+   bool _idleRunning = false;
+   int _lastSeenUid = 0;
+   final _processedUids = <int>{};
++  Future<void> _clientQueue = Future<void>.value();
+ 
+   final _otpController = StreamController<OtpEntry>.broadcast();
+   Stream<OtpEntry> get otpStream => _otpController.stream;
+@@ -171,42 +172,67 @@ class ImapService {
+   }
+ 
+   Future<List<OtpEntry>> _pollNewImpl() async {
+-    try {
+-      if (_client == null) await _reconnect();
+-      final uids = await _client!.searchNewUids(_lastSeenUid);
+-      if (uids.isEmpty) {
+-        _log('POLL', 'No new UID');
++    return _runClientOp(() async {
++      final sw = Stopwatch()..start();
++      try {
++        if (_client == null) await _reconnect();
++        final uids = await _client!.searchNewUids(_lastSeenUid);
++        if (uids.isEmpty) {
++          _log('POLL', 'No new UID (${sw.elapsedMilliseconds}ms)');
++          return const [];
++        }
++
++        _log('POLL', 'Fetching ${uids.length} UID(s): $uids');
++        final messages = await _client!.fetchMessagesByUid(uids);
++        _lastSeenUid = max(_lastSeenUid, uids.reduce(max));
++        _log('POLL', 'Fetched in ${sw.elapsedMilliseconds}ms');
++        return _emitOtpFromMessages(messages, source: 'POLL');
++      } catch (e) {
++        _log('POLL', 'Error: $e');
++        await _closeClient();
+         return const [];
+       }
++    });
++  }
+ 
+-      _log('POLL', 'Fetching ${uids.length} UID(s): $uids');
+-      final messages = await _client!.fetchMessagesByUid(uids);
+-      _lastSeenUid = max(_lastSeenUid, uids.reduce(max));
+-      return _emitOtpFromMessages(messages, source: 'POLL');
+-    } catch (e) {
+-      _log('POLL', 'Error: $e');
+-      await _closeClient();
+-      return const [];
+-    }
++  Future<T> _runClientOp<T>(Future<T> Function() action) {
++    final previous = _clientQueue;
++    final completer = Completer<T>();
++    _clientQueue = completer.future.then<void>((_) {}, onError: (_) {});
++
++    unawaited(
++      previous.whenComplete(() async {
++        try {
++          completer.complete(await action());
++        } catch (e, st) {
++          completer.completeError(e, st);
++        }
++      }),
++    );
++    return completer.future;
+   }
+ 
+   Future<List<OtpEntry>> _scanRecentForOtp({required int maxMessages}) async {
+-    try {
+-      if (_client == null) await _reconnect();
+-      _log('RECENT', 'Scanning last $maxMessages message(s)...');
+-      final messages = await _client!.fetchRecentMessages(
+-        maxMessages: maxMessages,
+-      );
+-      final maxUid = messages
+-          .map((m) => m.uid ?? 0)
+-          .fold<int>(_lastSeenUid, (a, b) => max(a, b));
+-      _lastSeenUid = max(_lastSeenUid, maxUid);
+-      return _emitOtpFromMessages(messages, source: 'RECENT');
+-    } catch (e) {
+-      _log('RECENT', 'Error: $e');
+-      await _closeClient();
+-      return const [];
+-    }
++    return _runClientOp(() async {
++      final sw = Stopwatch()..start();
++      try {
++        if (_client == null) await _reconnect();
++        _log('RECENT', 'Scanning last $maxMessages message(s)...');
++        final messages = await _client!.fetchRecentMessages(
++          maxMessages: maxMessages,
++        );
++        final maxUid = messages
++            .map((m) => m.uid ?? 0)
++            .fold<int>(_lastSeenUid, (a, b) => max(a, b));
++        _lastSeenUid = max(_lastSeenUid, maxUid);
++        _log('RECENT', 'Scanned in ${sw.elapsedMilliseconds}ms');
++        return _emitOtpFromMessages(messages, source: 'RECENT');
++      } catch (e) {
++        _log('RECENT', 'Error: $e');
++        await _closeClient();
++        return const [];
++      }
++    });
+   }
+ 
+   List<OtpEntry> _emitOtpFromMessages(
+diff --git a/lib/services/storage_service.dart b/lib/services/storage_service.dart
+index fbef77e..a7fed84 100644
+--- a/lib/services/storage_service.dart
++++ b/lib/services/storage_service.dart
+@@ -20,12 +20,17 @@ class StorageService {
+     final raw = prefs.getString(_accountsKey);
+     if (raw == null) return [];
+     final list = jsonDecode(raw) as List;
+-    return list.map((e) => Account.fromJson(e as Map<String, dynamic>)).toList();
++    return list
++        .map((e) => Account.fromJson(e as Map<String, dynamic>))
++        .toList();
+   }
+ 
+   Future<void> saveAccounts(List<Account> accounts) async {
+     final prefs = await SharedPreferences.getInstance();
+-    await prefs.setString(_accountsKey, jsonEncode(accounts.map((a) => a.toJson()).toList()));
++    await prefs.setString(
++      _accountsKey,
++      jsonEncode(accounts.map((a) => a.toJson()).toList()),
++    );
+   }
+ 
+   Future<List<Proxy>> loadProxies() async {
+@@ -38,7 +43,10 @@ class StorageService {
+ 
+   Future<void> saveProxies(List<Proxy> proxies) async {
+     final prefs = await SharedPreferences.getInstance();
+-    await prefs.setString(_proxiesKey, jsonEncode(proxies.map((p) => p.toJson()).toList()));
++    await prefs.setString(
++      _proxiesKey,
++      jsonEncode(proxies.map((p) => p.toJson()).toList()),
++    );
+   }
+ 
+   Future<List<String>> loadGroups() async {
+@@ -57,12 +65,17 @@ class StorageService {
+     final raw = prefs.getString(_filterRulesKey);
+     if (raw == null) return _defaultRules();
+     final list = jsonDecode(raw) as List;
+-    return list.map((e) => FilterRule.fromJson(e as Map<String, dynamic>)).toList();
++    return list
++        .map((e) => FilterRule.fromJson(e as Map<String, dynamic>))
++        .toList();
+   }
+ 
+   Future<void> saveFilterRules(List<FilterRule> rules) async {
+     final prefs = await SharedPreferences.getInstance();
+-    await prefs.setString(_filterRulesKey, jsonEncode(rules.map((r) => r.toJson()).toList()));
++    await prefs.setString(
++      _filterRulesKey,
++      jsonEncode(rules.map((r) => r.toJson()).toList()),
++    );
+   }
+ 
+   Future<Map<String, String>> loadImapConfig() async {
+@@ -108,27 +121,27 @@ class StorageService {
+   }
+ 
+   List<FilterRule> _defaultRules() => [
+-        FilterRule(
+-          type: FilterType.sender,
+-          pattern: 'pokemoncenter-online',
+-          extractPattern: r'【パスコード】\s*(\d{6})',
+-          enabled: true,
+-        ),
+-        FilterRule(
+-          type: FilterType.subject,
+-          pattern: 'ログイン',
+-          extractPattern: r'【パスコード】\s*(\d{6})',
+-          enabled: true,
+-        ),
+-      ];
++    FilterRule(
++      type: FilterType.sender,
++      pattern: 'pokemoncenter-online',
++      extractPattern: r'【パスコード】\s*(\d{6})',
++      enabled: true,
++    ),
++    FilterRule(
++      type: FilterType.subject,
++      pattern: 'ログイン',
++      extractPattern: r'【パスコード】\s*(\d{6})',
++      enabled: true,
++    ),
++  ];
+ 
+   Map<String, String> _defaultImapConfig() => {
+-        'host': 'imap.gmail.com',
+-        'port': '993',
+-        'username': 'duynguyenpk8793@gmail.com',
+-        'password': '',
+-        'pollInterval': '2',
+-      };
++    'host': 'imap.gmail.com',
++    'port': '993',
++    'username': 'duynguyenpk8793@gmail.com',
++    'password': '',
++    'pollInterval': '1',
++  };
+ 
+   Future<Map<String, String>> loadUrlConfig() async {
+     final prefs = await SharedPreferences.getInstance();
+@@ -143,8 +156,8 @@ class StorageService {
+   }
+ 
+   Map<String, String> _defaultUrlConfig() => {
+-        'loginUrl': 'https://www.pokemoncenter-online.com/login/',
+-        'lotteryUrl': '',
+-        'lotteryResultUrl': '',
+-      };
++    'loginUrl': 'https://www.pokemoncenter-online.com/login/',
++    'lotteryUrl': '',
++    'lotteryResultUrl': '',
++  };
+ }
+diff --git a/tool/imap_otp_probe.dart b/tool/imap_otp_probe.dart
+index 2358cfd..ba80fbc 100644
+--- a/tool/imap_otp_probe.dart
++++ b/tool/imap_otp_probe.dart
+@@ -16,8 +16,8 @@ Future<void> main(List<String> args) async {
+   final port = int.tryParse(opts['port'] ?? '') ?? 993;
+   final user = opts['user'] ?? Platform.environment['IMAP_USER'] ?? '';
+   final password = opts['password'] ?? Platform.environment['IMAP_PASS'] ?? '';
+-  final minutes = int.tryParse(opts['minutes'] ?? '') ?? 20;
+-  final maxMessages = int.tryParse(opts['max'] ?? '') ?? 30;
++  final minutes = int.tryParse(opts['minutes'] ?? '') ?? 2;
++  final maxMessages = int.tryParse(opts['max'] ?? '') ?? 3;
+   final watch = opts.containsKey('watch');
+   final watchSeconds = int.tryParse(opts['watch'] ?? '') ?? 120;
+   final pollSeconds = max(1, int.tryParse(opts['poll'] ?? '') ?? 1);
+@@ -150,8 +150,8 @@ Usage:
+ Options:
+   --host imap.gmail.com     Default: imap.gmail.com
+   --port 993                Default: 993
+-  --minutes 20              Only inspect recent mail in this window
+-  --max 30                  Number of recent messages to fetch
++  --minutes 2               Only inspect recent mail in this window
++  --max 3                   Number of recent messages to fetch
+   --watch 120               Poll new UID mail for this many seconds
+   --poll 1                  Watch poll interval in seconds
+   --raw                     Print raw IMAP protocol logs

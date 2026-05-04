@@ -352,7 +352,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final completer = Completer<String?>();
     StreamSubscription<OtpEntry>? sub;
     Timer? timeoutTimer;
-    Timer? fetchTimer;
     Timer? statusTimer;
     var elapsedSeconds = 0;
 
@@ -360,26 +359,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if (completer.isCompleted) return;
       unawaited(sub?.cancel());
       timeoutTimer?.cancel();
-      fetchTimer?.cancel();
       statusTimer?.cancel();
       completer.complete(code);
     }
 
-    Future<void> fetchAndCheck() async {
-      if (!mounted) {
-        finish(null);
-        return;
-      }
-      final results = await provider.fetchOtpNow();
-      if (!mounted || completer.isCompleted) return;
-      for (final otp in results) {
-        if (_matchesCurrentAccountOtp(otp, excludeCode: excludeCode)) {
-          finish(otp.code);
-          return;
-        }
-      }
+    void checkCachedOtp() {
       final latest = _getOtpForAccount();
       if (latest != null && latest != excludeCode) finish(latest);
+    }
+
+    if (!provider.imapRunning && !provider.imapStarting) {
+      _setStatus('OTP server chua chay. Bam Bat dau o OTP Monitor.');
     }
 
     sub = provider.otpStream.listen((otp) {
@@ -393,10 +383,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
     });
 
     timeoutTimer = Timer(timeout, () => finish(null));
-    fetchTimer = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) => unawaited(fetchAndCheck()),
-    );
     statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       elapsedSeconds += 5;
       if (mounted && !completer.isCompleted) {
@@ -404,7 +390,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       }
     });
 
-    unawaited(fetchAndCheck());
+    checkCachedOtp();
     return completer.future;
   }
 

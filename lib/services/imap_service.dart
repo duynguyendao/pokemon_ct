@@ -54,9 +54,9 @@ class EmailSearchResult {
 }
 
 class ImapService {
-  static const _maxOtpMessageAge = Duration(minutes: 15);
-  static const _startupRecentMessages = 12;
-  static const _searchRecentFloor = 30;
+  static const _maxOtpMessageAge = Duration(minutes: 2);
+  static const _startupRecentMessages = 3;
+  static const _searchRecentFloor = 3;
 
   FastImapClient? _client;
   FastImapClient? _idleClient;
@@ -68,6 +68,7 @@ class ImapService {
   bool _idleRunning = false;
   int _lastSeenUid = 0;
   final _processedUids = <int>{};
+  Future<void> _clientQueue = Future<void>.value();
 
   final _otpController = StreamController<OtpEntry>.broadcast();
   Stream<OtpEntry> get otpStream => _otpController.stream;
@@ -171,42 +172,67 @@ class ImapService {
   }
 
   Future<List<OtpEntry>> _pollNewImpl() async {
-    try {
-      if (_client == null) await _reconnect();
-      final uids = await _client!.searchNewUids(_lastSeenUid);
-      if (uids.isEmpty) {
-        _log('POLL', 'No new UID');
+    return _runClientOp(() async {
+      final sw = Stopwatch()..start();
+      try {
+        if (_client == null) await _reconnect();
+        final uids = await _client!.searchNewUids(_lastSeenUid);
+        if (uids.isEmpty) {
+          _log('POLL', 'No new UID (${sw.elapsedMilliseconds}ms)');
+          return const [];
+        }
+
+        _log('POLL', 'Fetching ${uids.length} UID(s): $uids');
+        final messages = await _client!.fetchMessagesByUid(uids);
+        _lastSeenUid = max(_lastSeenUid, uids.reduce(max));
+        _log('POLL', 'Fetched in ${sw.elapsedMilliseconds}ms');
+        return _emitOtpFromMessages(messages, source: 'POLL');
+      } catch (e) {
+        _log('POLL', 'Error: $e');
+        await _closeClient();
         return const [];
       }
+    });
+  }
 
-      _log('POLL', 'Fetching ${uids.length} UID(s): $uids');
-      final messages = await _client!.fetchMessagesByUid(uids);
-      _lastSeenUid = max(_lastSeenUid, uids.reduce(max));
-      return _emitOtpFromMessages(messages, source: 'POLL');
-    } catch (e) {
-      _log('POLL', 'Error: $e');
-      await _closeClient();
-      return const [];
-    }
+  Future<T> _runClientOp<T>(Future<T> Function() action) {
+    final previous = _clientQueue;
+    final completer = Completer<T>();
+    _clientQueue = completer.future.then<void>((_) {}, onError: (_) {});
+
+    unawaited(
+      previous.whenComplete(() async {
+        try {
+          completer.complete(await action());
+        } catch (e, st) {
+          completer.completeError(e, st);
+        }
+      }),
+    );
+    return completer.future;
   }
 
   Future<List<OtpEntry>> _scanRecentForOtp({required int maxMessages}) async {
-    try {
-      if (_client == null) await _reconnect();
-      _log('RECENT', 'Scanning last $maxMessages message(s)...');
-      final messages = await _client!.fetchRecentMessages(
-        maxMessages: maxMessages,
-      );
-      final maxUid = messages
-          .map((m) => m.uid ?? 0)
-          .fold<int>(_lastSeenUid, (a, b) => max(a, b));
-      _lastSeenUid = max(_lastSeenUid, maxUid);
-      return _emitOtpFromMessages(messages, source: 'RECENT');
-    } catch (e) {
-      _log('RECENT', 'Error: $e');
-      await _closeClient();
-      return const [];
-    }
+    return _runClientOp(() async {
+      final sw = Stopwatch()..start();
+      try {
+        if (_client == null) await _reconnect();
+        _log('RECENT', 'Scanning last $maxMessages message(s)...');
+        final messages = await _client!.fetchRecentMessages(
+          maxMessages: maxMessages,
+        );
+        final maxUid = messages
+            .map((m) => m.uid ?? 0)
+            .fold<int>(_lastSeenUid, (a, b) => max(a, b));
+        _lastSeenUid = max(_lastSeenUid, maxUid);
+        _log('RECENT', 'Scanned in ${sw.elapsedMilliseconds}ms');
+        return _emitOtpFromMessages(messages, source: 'RECENT');
+      } catch (e) {
+        _log('RECENT', 'Error: $e');
+        await _closeClient();
+        return const [];
+      }
+    });
   }
 
   List<OtpEntry> _emitOtpFromMessages(

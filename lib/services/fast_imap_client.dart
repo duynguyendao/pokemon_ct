@@ -62,6 +62,8 @@ class FastImapException implements Exception {
 }
 
 class FastImapClient {
+  static const _defaultBodyBytes = 64 * 1024;
+
   final void Function(String line)? debugLog;
 
   Socket? _socket;
@@ -149,10 +151,14 @@ class FastImapClient {
     return uids;
   }
 
-  Future<List<FastImapMessage>> fetchMessagesByUid(List<int> uids) async {
+  Future<List<FastImapMessage>> fetchMessagesByUid(
+    List<int> uids, {
+    int maxBodyBytes = _defaultBodyBytes,
+  }) async {
     if (uids.isEmpty) return const [];
     final lines = await _command(
-      'UID FETCH ${_uidSet(uids)} (UID INTERNALDATE BODY.PEEK[])',
+      'UID FETCH ${_uidSet(uids)} '
+      '(UID INTERNALDATE BODY.PEEK[]<0.$maxBodyBytes>)',
       timeout: const Duration(seconds: 20),
     );
     return _parseFetchMessages(lines);
@@ -160,6 +166,7 @@ class FastImapClient {
 
   Future<List<FastImapMessage>> fetchRecentMessages({
     int maxMessages = 30,
+    int maxBodyBytes = _defaultBodyBytes,
   }) async {
     final state = await selectInbox();
     if (state.exists <= 0) return const [];
@@ -168,7 +175,7 @@ class FastImapClient {
     final start = state.exists - count + 1;
     final rangeStart = start < 1 ? 1 : start;
     final lines = await _command(
-      'FETCH $rangeStart:* (UID INTERNALDATE BODY.PEEK[])',
+      'FETCH $rangeStart:* (UID INTERNALDATE BODY.PEEK[]<0.$maxBodyBytes>)',
       timeout: const Duration(seconds: 25),
     );
     final messages = _parseFetchMessages(lines);

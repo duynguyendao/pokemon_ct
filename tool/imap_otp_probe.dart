@@ -16,8 +16,8 @@ Future<void> main(List<String> args) async {
   final port = int.tryParse(opts['port'] ?? '') ?? 993;
   final user = opts['user'] ?? Platform.environment['IMAP_USER'] ?? '';
   final password = opts['password'] ?? Platform.environment['IMAP_PASS'] ?? '';
-  final minutes = int.tryParse(opts['minutes'] ?? '') ?? 20;
-  final maxMessages = int.tryParse(opts['max'] ?? '') ?? 30;
+  final minutes = int.tryParse(opts['minutes'] ?? '') ?? 2;
+  final maxMessages = int.tryParse(opts['max'] ?? '') ?? 3;
   final watch = opts.containsKey('watch');
   final watchSeconds = int.tryParse(opts['watch'] ?? '') ?? 120;
   final pollSeconds = max(1, int.tryParse(opts['poll'] ?? '') ?? 1);
@@ -150,8 +150,8 @@ Usage:
 Options:
   --host imap.gmail.com     Default: imap.gmail.com
   --port 993                Default: 993
-  --minutes 20              Only inspect recent mail in this window
-  --max 30                  Number of recent messages to fetch
+  --minutes 2               Only inspect recent mail in this window
+  --max 3                   Number of recent messages to fetch
   --watch 120               Poll new UID mail for this many seconds
   --poll 1                  Watch poll interval in seconds
   --raw                     Print raw IMAP protocol logs

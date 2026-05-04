@@ -17,6 +17,8 @@ class AppProvider extends ChangeNotifier {
   List<String> _groups = [];
   List<FilterRule> _filterRules = [];
   List<OtpEntry> _otpHistory = [];
+  final Map<String, OtpEntry> _latestOtpByRecipient = {};
+  OtpEntry? _latestOtpWithoutRecipient;
   Map<String, String> _imapConfig = {};
   Map<String, String> _urlConfig = {};
 
@@ -89,16 +91,38 @@ class AppProvider extends ChangeNotifier {
   void _setupOtpStream() {
     _otpSub?.cancel();
     _otpSub = _imap.otpStream.listen((otp) {
-      if (!_otpHistory.any(
-        (e) =>
-            e.code == otp.code &&
-            otp.timestamp.difference(e.timestamp).abs().inSeconds < 30,
-      )) {
+      _cacheOtp(otp);
+      if (!_isDuplicateOtp(otp)) {
         _otpHistory.insert(0, otp);
         if (_otpHistory.length > 50) _otpHistory.removeLast();
-        notifyListeners();
       }
+      notifyListeners();
     });
+  }
+
+  void _cacheOtp(OtpEntry otp) {
+    final recipient = otp.recipient?.trim() ?? '';
+    if (recipient.isEmpty) {
+      if (_latestOtpWithoutRecipient == null ||
+          otp.timestamp.isAfter(_latestOtpWithoutRecipient!.timestamp)) {
+        _latestOtpWithoutRecipient = otp;
+      }
+      return;
+    }
+
+    final key = _normalizeEmail(recipient);
+    final current = _latestOtpByRecipient[key];
+    if (current == null || otp.timestamp.isAfter(current.timestamp)) {
+      _latestOtpByRecipient[key] = otp;
+    }
+  }
+
+  bool _isDuplicateOtp(OtpEntry otp) {
+    return _otpHistory.any(
+      (e) =>
+          e.code == otp.code &&
+          otp.timestamp.difference(e.timestamp).abs().inSeconds < 30,
+    );
   }
 
   // --- Accounts ---
@@ -302,13 +326,16 @@ class AppProvider extends ChangeNotifier {
 
   void clearOtpHistory() {
     _otpHistory.clear();
+    _latestOtpByRecipient.clear();
+    _latestOtpWithoutRecipient = null;
     notifyListeners();
   }
 
   Future<List<OtpEntry>> fetchOtpNow() async {
     final results = await _imap.fetchNow();
     for (final otp in results) {
-      if (!_otpHistory.any((e) => e.id == otp.id)) {
+      _cacheOtp(otp);
+      if (!_isDuplicateOtp(otp)) {
         _otpHistory.insert(0, otp);
       }
     }
@@ -343,12 +370,8 @@ class AppProvider extends ChangeNotifier {
     final portStr = _imapConfig['port'];
     final user = _imapConfig['username'];
     final pass = _imapConfig['password'];
-    final pollStr = _imapConfig['pollInterval'];
 
     if (host == null || user == null || pass == null) return null;
-
-    final parsedPoll = int.tryParse(pollStr ?? '') ?? 2;
-    final fastPoll = parsedPoll.clamp(1, 5).toInt();
 
     return ImapConfig(
       host: host,
@@ -356,7 +379,7 @@ class AppProvider extends ChangeNotifier {
       username: user,
       password: pass,
       isSecure: (int.tryParse(portStr ?? '') ?? 993) == 993,
-      pollIntervalSeconds: fastPoll,
+      pollIntervalSeconds: 1,
     );
   }
 
@@ -372,15 +395,29 @@ class AppProvider extends ChangeNotifier {
   /// OTP entry mới nhất cho account email.
   /// [after]: chỉ lấy OTP có timestamp >= after.
   OtpEntry? latestOtpEntryForEmail(String accountEmail, {DateTime? after}) {
+    final cached = _latestOtpByRecipient[_normalizeEmail(accountEmail)];
+    if (cached != null &&
+        (after == null || !cached.timestamp.isBefore(after))) {
+      return cached;
+    }
+
+    final unknown = _latestOtpWithoutRecipient;
+    if (unknown != null &&
+        (after == null || !unknown.timestamp.isBefore(after))) {
+      return unknown;
+    }
+
     OtpEntry? unknownRecipientFallback;
     for (final otp in _otpHistory) {
       if (after != null && otp.timestamp.isBefore(after)) continue;
       final recipient = otp.recipient?.trim() ?? '';
       if (recipient.isEmpty) {
         unknownRecipientFallback ??= otp;
+        _cacheOtp(otp);
         continue;
       }
       if (!_sameEmailAddress(recipient, accountEmail)) continue;
+      _cacheOtp(otp);
       return otp;
     }
     return unknownRecipientFallback;

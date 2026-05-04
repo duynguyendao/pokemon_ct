@@ -20,12 +20,17 @@ class StorageService {
     final raw = prefs.getString(_accountsKey);
     if (raw == null) return [];
     final list = jsonDecode(raw) as List;
-    return list.map((e) => Account.fromJson(e as Map<String, dynamic>)).toList();
+    return list
+        .map((e) => Account.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> saveAccounts(List<Account> accounts) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_accountsKey, jsonEncode(accounts.map((a) => a.toJson()).toList()));
+    await prefs.setString(
+      _accountsKey,
+      jsonEncode(accounts.map((a) => a.toJson()).toList()),
+    );
   }
 
   Future<List<Proxy>> loadProxies() async {
@@ -38,7 +43,10 @@ class StorageService {
 
   Future<void> saveProxies(List<Proxy> proxies) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_proxiesKey, jsonEncode(proxies.map((p) => p.toJson()).toList()));
+    await prefs.setString(
+      _proxiesKey,
+      jsonEncode(proxies.map((p) => p.toJson()).toList()),
+    );
   }
 
   Future<List<String>> loadGroups() async {
@@ -57,12 +65,17 @@ class StorageService {
     final raw = prefs.getString(_filterRulesKey);
     if (raw == null) return _defaultRules();
     final list = jsonDecode(raw) as List;
-    return list.map((e) => FilterRule.fromJson(e as Map<String, dynamic>)).toList();
+    return list
+        .map((e) => FilterRule.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> saveFilterRules(List<FilterRule> rules) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_filterRulesKey, jsonEncode(rules.map((r) => r.toJson()).toList()));
+    await prefs.setString(
+      _filterRulesKey,
+      jsonEncode(rules.map((r) => r.toJson()).toList()),
+    );
   }
 
   Future<Map<String, String>> loadImapConfig() async {
@@ -108,27 +121,27 @@ class StorageService {
   }
 
   List<FilterRule> _defaultRules() => [
-        FilterRule(
-          type: FilterType.sender,
-          pattern: 'pokemoncenter-online',
-          extractPattern: r'【パスコード】\s*(\d{6})',
-          enabled: true,
-        ),
-        FilterRule(
-          type: FilterType.subject,
-          pattern: 'ログイン',
-          extractPattern: r'【パスコード】\s*(\d{6})',
-          enabled: true,
-        ),
-      ];
+    FilterRule(
+      type: FilterType.sender,
+      pattern: 'pokemoncenter-online',
+      extractPattern: r'【パスコード】\s*(\d{6})',
+      enabled: true,
+    ),
+    FilterRule(
+      type: FilterType.subject,
+      pattern: 'ログイン',
+      extractPattern: r'【パスコード】\s*(\d{6})',
+      enabled: true,
+    ),
+  ];
 
   Map<String, String> _defaultImapConfig() => {
-        'host': 'imap.gmail.com',
-        'port': '993',
-        'username': 'duynguyenpk8793@gmail.com',
-        'password': '',
-        'pollInterval': '2',
-      };
+    'host': 'imap.gmail.com',
+    'port': '993',
+    'username': 'duynguyenpk8793@gmail.com',
+    'password': '',
+    'pollInterval': '1',
+  };
 
   Future<Map<String, String>> loadUrlConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -143,8 +156,8 @@ class StorageService {
   }
 
   Map<String, String> _defaultUrlConfig() => {
-        'loginUrl': 'https://www.pokemoncenter-online.com/login/',
-        'lotteryUrl': '',
-        'lotteryResultUrl': '',
-      };
+    'loginUrl': 'https://www.pokemoncenter-online.com/login/',
+    'lotteryUrl': '',
+    'lotteryResultUrl': '',
+  };
 }
