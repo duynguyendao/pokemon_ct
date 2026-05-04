@@ -362,6 +362,14 @@ class AppProvider extends ChangeNotifier {
     return null;
   }
 
+  Future<void> setAllAccountsMode(AccountMode mode) async {
+    for (var i = 0; i < _accounts.length; i++) {
+      _accounts[i] = _accounts[i].copyWith(mode: mode);
+    }
+    await _storage.saveAccounts(_accounts);
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _otpSub?.cancel();

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/account.dart';
+import '../models/start_all_report.dart';
 import '../providers/app_provider.dart';
 import '../services/shortcut_service.dart';
 import '../utils/app_theme.dart';
@@ -8,6 +9,7 @@ import '../widgets/account_card.dart';
 import '../widgets/summary_card.dart';
 import 'add_account_screen.dart';
 import 'browser_screen.dart';
+import 'package:share_plus/share_plus.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -30,6 +32,9 @@ class _HomeScreenState extends State<HomeScreen>
   bool _runningAll = false;
   int _runAllIndex = 0;
   List<Account> _runAllList = [];
+  bool _stopCurrentRequested = false;
+  bool _stopAllRequested = false;
+  late StartAllReport _currentReport;
 
   // Pokeball animation
   late AnimationController _pokeballController;
@@ -197,18 +202,139 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _runAllAccounts(AppProvider p) async {
     final list = _filtered(p).where((a) => a.status == 'todo').toList();
     if (list.isEmpty) return;
+
+    _currentReport = StartAllReport(startTime: DateTime.now(), results: []);
+    _stopCurrentRequested = false;
+    _stopAllRequested = false;
+
     setState(() {
       _runningAll = true;
       _runAllIndex = 0;
       _runAllList = list;
     });
+
     for (var i = 0; i < list.length; i++) {
-      if (!_runningAll || !mounted) break;
+      if (_stopAllRequested || !mounted) break;
+      if (_stopCurrentRequested) {
+        _currentReport.results.add(StartAllResult(
+          accountEmail: list[i].email,
+          success: false,
+          error: 'Stopped by user',
+          startTime: DateTime.now(),
+          endTime: DateTime.now(),
+          status: 'stopped',
+        ));
+        _stopCurrentRequested = false;
+        continue;
+      }
+
       setState(() => _runAllIndex = i);
-      await _openAccount(list[i], p);
+      final startTime = DateTime.now();
+      try {
+        await _openAccount(list[i], p);
+        _currentReport.results.add(StartAllResult(
+          accountEmail: list[i].email,
+          success: true,
+          startTime: startTime,
+          endTime: DateTime.now(),
+          status: 'success',
+        ));
+      } catch (e) {
+        _currentReport.results.add(StartAllResult(
+          accountEmail: list[i].email,
+          success: false,
+          error: e.toString(),
+          startTime: startTime,
+          endTime: DateTime.now(),
+          status: 'error',
+        ));
+      }
       if (!mounted) break;
     }
-    if (mounted) setState(() => _runningAll = false);
+
+    if (mounted) {
+      _currentReport = StartAllReport(
+        startTime: _currentReport.startTime,
+        endTime: DateTime.now(),
+        results: _currentReport.results,
+      );
+      setState(() => _runningAll = false);
+      _showStartAllReport();
+    }
+  }
+
+  void _showStartAllReport() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: const Text('Start All Report', style: TextStyle(color: Colors.white)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('✅ Success: ${_currentReport.successCount}',
+                  style: const TextStyle(color: AppColors.done, fontWeight: FontWeight.bold)),
+              Text('❌ Error: ${_currentReport.errorCount}',
+                  style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.bold)),
+              Text('⏸️ Stopped: ${_currentReport.stoppedCount}',
+                  style: const TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              const Divider(color: AppColors.divider),
+              const SizedBox(height: 8),
+              ..._currentReport.results.map((r) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  '${r.accountEmail}: ${r.status}${r.error != null ? " (${r.error})" : ""}',
+                  style: TextStyle(
+                    color: r.status == 'success' ? AppColors.done : AppColors.error,
+                    fontSize: 12,
+                  ),
+                ),
+              )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Share.share(_currentReport.toTxt());
+            },
+            child: const Text('Share TXT'),
+          ),
+          TextButton(
+            onPressed: () {
+              Share.share(_currentReport.toCsv());
+            },
+            child: const Text('Share CSV'),
+          ),
+          ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
+  void _showGlobalModeDialog(BuildContext ctx, AppProvider p) {
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: const Text('Set global mode cho tất cả account', style: TextStyle(color: Colors.white)),
+        content: const Text('Chọn mode sẽ áp dụng cho toàn bộ tài khoản:', style: TextStyle(color: AppColors.textSecondary)),
+        actions: [
+          ...AccountMode.values.map((mode) => ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.secondary),
+            onPressed: () {
+              p.setAllAccountsMode(mode);
+              Navigator.pop(ctx);
+            },
+            child: Text(mode.label),
+          )),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+        ],
+      ),
+    );
   }
 
   void _showEditDialog(BuildContext ctx, Account account, AppProvider p) {
@@ -485,9 +611,14 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
             IconButton(
+              icon: const Icon(Icons.skip_next, color: AppColors.warning),
+              tooltip: 'Stop current account, go next',
+              onPressed: () => setState(() => _stopCurrentRequested = true),
+            ),
+            IconButton(
               icon: const Icon(Icons.stop_circle, color: AppColors.error),
-              tooltip: 'Dừng Start All',
-              onPressed: () => setState(() => _runningAll = false),
+              tooltip: 'Stop all',
+              onPressed: () => setState(() => _stopAllRequested = true),
             ),
           ] else if (_batchMode) ...[
             Text('${_selected.length} đã chọn',
@@ -513,6 +644,11 @@ class _HomeScreenState extends State<HomeScreen>
               icon: const Icon(Icons.play_circle_outline, color: AppColors.done),
               tooltip: 'Start All (chạy tuần tự tất cả TODO)',
               onPressed: () => _runAllAccounts(p),
+            ),
+            IconButton(
+              icon: const Icon(Icons.tune, color: AppColors.secondary),
+              tooltip: 'Set global mode (Login/Lottery/Result)',
+              onPressed: () => _showGlobalModeDialog(context, p),
             ),
             IconButton(
               icon: Icon(_searchVisible ? Icons.close : Icons.search),
