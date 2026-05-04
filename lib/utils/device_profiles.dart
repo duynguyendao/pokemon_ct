@@ -358,21 +358,80 @@ String buildOtpFillScript(String otp) {
     }
     return false;
   }
-
   const otpSelectors = [
-    'input[name="otp"]',
-    'input[name="code"]',
-    'input[name="token"]',
-    'input[id*="otp"]',
-    'input[id*="code"]',
-    'input[placeholder*="認証"]',
-    'input[placeholder*="コード"]',
-    'input[maxlength="6"]',
-    'input[maxlength="4"]',
+    'input[name="passcode"]', 'input[name="otp"]', 'input[name="code"]',
+    'input[name="token"]', 'input[id*="otp"]', 'input[id*="code"]',
+    'input[placeholder*="認証"]', 'input[placeholder*="コード"]',
+    'input[placeholder*="パスコード"]', 'input[maxlength="6"]', 'input[maxlength="4"]',
   ];
-
   for (const sel of otpSelectors) {
     if (fill(sel, '$otp')) break;
+  }
+})();
+''';
+}
+
+/// Fill OTP + click submit button, then report success/error back to Flutter
+String buildOtpAutoSubmitScript(String otp) {
+  return '''
+(function() {
+  function fill(selector, val) {
+    const el = document.querySelector(selector);
+    if (el) {
+      el.focus();
+      el.value = val;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+      return true;
+    }
+    return false;
+  }
+  const otpSelectors = [
+    'input[name="passcode"]', 'input[name="otp"]', 'input[name="code"]',
+    'input[id*="otp"]', 'input[id*="code"]', 'input[id*="passcode"]',
+    'input[placeholder*="パスコード"]', 'input[placeholder*="コード"]',
+    'input[maxlength="6"]',
+  ];
+  let filled = false;
+  for (const sel of otpSelectors) {
+    if (fill(sel, '$otp')) { filled = true; break; }
+  }
+  if (!filled) {
+    window.FlutterChannel.postMessage(JSON.stringify({type:'otpStatus', status:'noField'}));
+    return;
+  }
+  window.FlutterChannel.postMessage(JSON.stringify({type:'otpStatus', status:'filled'}));
+  setTimeout(() => {
+    const keywords = ['認証', '送信', '確認', '次へ', 'submit', 'confirm'];
+    const btns = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
+    for (const btn of btns) {
+      const t = (btn.textContent || btn.value || '').trim();
+      if (keywords.some(k => t.includes(k) || t.toLowerCase().includes(k))) {
+        btn.click();
+        window.FlutterChannel.postMessage(JSON.stringify({type:'otpStatus', status:'submitted'}));
+        return;
+      }
+    }
+    window.FlutterChannel.postMessage(JSON.stringify({type:'otpStatus', status:'noButton'}));
+  }, 600);
+})();
+''';
+}
+
+/// Phát hiện lỗi OTP trên trang hiện tại
+String buildOtpErrorDetectScript() {
+  return '''
+(function() {
+  const errorKeywords = [
+    'パスコードが正しくありません', 'パスコードが違', '正しくない',
+    'コードが正しくありません', '無効', '期限', '有効期限',
+    'incorrect', 'invalid', 'expired', 'wrong code'
+  ];
+  const text = document.body ? document.body.innerText : '';
+  const hasError = errorKeywords.some(k => text.includes(k));
+  if (hasError) {
+    window.FlutterChannel.postMessage(JSON.stringify({type:'otpError', detected:true}));
   }
 })();
 ''';

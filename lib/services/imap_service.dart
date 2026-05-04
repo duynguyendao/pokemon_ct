@@ -333,14 +333,17 @@ class ImapService {
       }
     }
 
-    final fallback = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
-    if (fallback != null) {
-      return OtpEntry(
-        code: fallback,
-        sender: sender,
-        subject: subject,
-        timestamp: msg.decodeDate() ?? DateTime.now(),
-      );
+    // Chỉ dùng fallback khi chưa có rule nào — tránh lấy OTP từ email khác (AliExpress, v.v.)
+    if (_rules.isEmpty) {
+      final fallback = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
+      if (fallback != null) {
+        return OtpEntry(
+          code: fallback,
+          sender: sender,
+          subject: subject,
+          timestamp: msg.decodeDate() ?? DateTime.now(),
+        );
+      }
     }
     return null;
   }

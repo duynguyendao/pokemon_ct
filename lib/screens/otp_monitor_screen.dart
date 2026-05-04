@@ -26,6 +26,11 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   final _passCtrl = TextEditingController();
   final _pollCtrl = TextEditingController(text: '2');
 
+  // URL config
+  final _loginUrlCtrl = TextEditingController(text: 'https://www.pokemoncenter-online.com/login/');
+  final _lotteryUrlCtrl = TextEditingController();
+  final _lotteryResultUrlCtrl = TextEditingController();
+
   // Search
   final _searchSubjectCtrl = TextEditingController(text: 'ポケモンセンター');
   DateTime _searchFrom = DateTime.now().subtract(const Duration(hours: 1));
@@ -57,6 +62,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     if (cfg['username']?.isNotEmpty == true) _userCtrl.text = cfg['username']!;
     if (cfg['password']?.isNotEmpty == true) _passCtrl.text = cfg['password']!;
     if (cfg['pollInterval']?.isNotEmpty == true) _pollCtrl.text = cfg['pollInterval']!;
+    final urls = p.urlConfig;
+    if (urls['loginUrl']?.isNotEmpty == true) _loginUrlCtrl.text = urls['loginUrl']!;
+    if (urls['lotteryUrl']?.isNotEmpty == true) _lotteryUrlCtrl.text = urls['lotteryUrl']!;
+    if (urls['lotteryResultUrl']?.isNotEmpty == true) _lotteryResultUrlCtrl.text = urls['lotteryResultUrl']!;
   }
 
   @override
@@ -68,6 +77,9 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     _passCtrl.dispose();
     _pollCtrl.dispose();
     _searchSubjectCtrl.dispose();
+    _loginUrlCtrl.dispose();
+    _lotteryUrlCtrl.dispose();
+    _lotteryResultUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -78,6 +90,11 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
       'username': _userCtrl.text.trim(),
       'password': _passCtrl.text.trim(),
       'pollInterval': _pollCtrl.text.trim(),
+    });
+    await p.saveUrlConfig({
+      'loginUrl': _loginUrlCtrl.text.trim(),
+      'lotteryUrl': _lotteryUrlCtrl.text.trim(),
+      'lotteryResultUrl': _lotteryResultUrlCtrl.text.trim(),
     });
   }
 
@@ -474,6 +491,60 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
                     style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
               ),
             ),
+
+          const SizedBox(height: 16),
+
+          // URL Settings
+          _sectionCard(
+            title: '🔗 Cài đặt đường dẫn',
+            children: [
+              TextField(
+                controller: _loginUrlCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: const InputDecoration(
+                  labelText: 'Login URL',
+                  prefixIcon: Icon(Icons.login, color: AppColors.primary, size: 18),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _lotteryUrlCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: const InputDecoration(
+                  labelText: 'Lottery URL',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(Icons.casino_outlined, color: AppColors.secondary, size: 18),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _lotteryResultUrlCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: const InputDecoration(
+                  labelText: 'Lottery Result URL',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(Icons.emoji_events_outlined, color: AppColors.done, size: 18),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await _saveConfig(p);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('✅ Đã lưu cài đặt'), duration: Duration(seconds: 1)),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.save_outlined, size: 16),
+                  label: const Text('Lưu đường dẫn'),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

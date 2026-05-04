@@ -18,6 +18,7 @@ class AppProvider extends ChangeNotifier {
   List<FilterRule> _filterRules = [];
   List<OtpEntry> _otpHistory = [];
   Map<String, String> _imapConfig = {};
+  Map<String, String> _urlConfig = {};
 
   String _defaultPassword = '';
   bool _proxyEnabled = false;
@@ -35,6 +36,10 @@ class AppProvider extends ChangeNotifier {
   List<FilterRule> get filterRules => _filterRules;
   List<OtpEntry> get otpHistory => _otpHistory;
   Map<String, String> get imapConfig => _imapConfig;
+  Map<String, String> get urlConfig => _urlConfig;
+  String get loginUrl => _urlConfig['loginUrl'] ?? 'https://www.pokemoncenter-online.com/login/';
+  String get lotteryUrl => _urlConfig['lotteryUrl'] ?? '';
+  String get lotteryResultUrl => _urlConfig['lotteryResultUrl'] ?? '';
   String get defaultPassword => _defaultPassword;
   bool get proxyEnabled => _proxyEnabled;
   bool get fakeBrowser => _fakeBrowser;
@@ -61,6 +66,7 @@ class AppProvider extends ChangeNotifier {
     _groups = await _storage.loadGroups();
     _filterRules = await _storage.loadFilterRules();
     _imapConfig = await _storage.loadImapConfig();
+    _urlConfig = await _storage.loadUrlConfig();
     _defaultPassword = await _storage.loadDefaultPassword();
     _proxyEnabled = await _storage.loadProxyEnabled();
     _fakeBrowser = await _storage.loadFakeBrowser();
@@ -224,6 +230,14 @@ class AppProvider extends ChangeNotifier {
     _filterRules = rules;
     _imap.setRules(rules);
     await _storage.saveFilterRules(rules);
+    notifyListeners();
+  }
+
+  // --- URL Config ---
+
+  Future<void> saveUrlConfig(Map<String, String> config) async {
+    _urlConfig = config;
+    await _storage.saveUrlConfig(config);
     notifyListeners();
   }
 

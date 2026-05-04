@@ -10,6 +10,7 @@ class StorageService {
   static const _groupsKey = 'groups';
   static const _filterRulesKey = 'filterRules';
   static const _imapConfigKey = 'imapConfig';
+  static const _urlConfigKey = 'urlConfig';
   static const _defaultPasswordKey = 'defaultPassword';
   static const _proxyEnabledKey = 'proxyEnabled';
   static const _fakeBrowserKey = 'fakeBrowser';
@@ -127,5 +128,23 @@ class StorageService {
         'username': 'duynguyenpk8793@gmail.com',
         'password': '',
         'pollInterval': '2',
+      };
+
+  Future<Map<String, String>> loadUrlConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_urlConfigKey);
+    if (raw == null) return _defaultUrlConfig();
+    return Map<String, String>.from(jsonDecode(raw) as Map);
+  }
+
+  Future<void> saveUrlConfig(Map<String, String> config) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_urlConfigKey, jsonEncode(config));
+  }
+
+  Map<String, String> _defaultUrlConfig() => {
+        'loginUrl': 'https://www.pokemoncenter-online.com/login/',
+        'lotteryUrl': '',
+        'lotteryResultUrl': '',
       };
 }
