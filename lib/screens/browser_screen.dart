@@ -29,37 +29,63 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _autoFilling = false;
   String? _lastAutoFillUrl;
 
-  // OTP auto-submit state
+  // OTP auto-submit
   bool _otpAutoSubmitting = false;
+  String? _lastOtpPageUrl; // tránh trigger lại cùng một URL
   int _otpRetryCount = 0;
   static const int _maxOtpRetries = 3;
   String? _lastSubmittedOtp;
+
+  // JS để phát hiện field OTP trên trang
+  static const String _detectOtpFieldJs = '''
+(function() {
+  // Pokémon Center: input#authCode hoặc input[name="dwfrm_factor2Auth_authCode"]
+  var selectors = [
+    'input#authCode',
+    'input[name="dwfrm_factor2Auth_authCode"]',
+    'input[name="passcode"]','input[name="otp"]','input[name="code"]',
+    'input[id*="auth"]','input[id*="otp"]','input[id*="passcode"]',
+    'input[placeholder*="パスコード"]','input[maxlength="6"]'
+  ];
+  for (var i = 0; i < selectors.length; i++) {
+    if (document.querySelector(selectors[i])) {
+      window.FlutterChannel.postMessage('{"type":"otpField","detected":true}');
+      break;
+    }
+  }
+  // Phát hiện thông báo lỗi
+  var errorWords = ['パスコードが正しくありません','パスコードが違','正しくない','無効','incorrect','invalid','expired'];
+  var bodyText = document.body ? document.body.innerText : '';
+  for (var j = 0; j < errorWords.length; j++) {
+    if (bodyText.indexOf(errorWords[j]) >= 0) {
+      window.FlutterChannel.postMessage('{"type":"otpError","detected":true}');
+      break;
+    }
+  }
+})();
+''';
 
   @override
   void initState() {
     super.initState();
     _profile = randomProfile();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final p = context.read<AppProvider>();
-      _initController(p.loginUrl);
-    });
+    // context.read là safe trong initState
+    final startUrl = context.read<AppProvider>().loginUrl;
+    _initController(startUrl);
   }
 
   bool _isLoginPage(String url) {
     final u = url.toLowerCase();
     return u.contains('/login') &&
+        !u.contains('mfa') &&
+        !u.contains('auth') &&
         !u.contains('passcode') &&
         !u.contains('otp') &&
         !u.contains('code') &&
-        !u.contains('verify');
-  }
-
-  bool _isOtpPage(String url) {
-    final u = url.toLowerCase();
-    return u.contains('passcode') ||
-        u.contains('/otp') ||
-        u.contains('/authenticate') ||
-        u.contains('/verify');
+        !u.contains('verify') &&
+        !u.contains('factor') &&
+        !u.contains('2step') &&
+        !u.contains('twostep');
   }
 
   void _initController(String startUrl) {
@@ -72,7 +98,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
           setState(() {
             _currentUrl = url;
             _loading = true;
-            _otpRetryCount = 0;
           });
           if (p.fakeBrowser) {
             _controller.runJavaScript(buildAntiFingerprintScript(_profile));
@@ -87,23 +112,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
             await _controller.runJavaScript(buildAntiFingerprintScript(_profile));
           }
 
-          // Auto-fill credentials on login page
+          // Auto-fill email + password trên trang login
           if (_isLoginPage(url) && _lastAutoFillUrl != url && !_autoFilling) {
             _lastAutoFillUrl = url;
-            await Future.delayed(const Duration(milliseconds: 600));
+            await Future.delayed(const Duration(milliseconds: 700));
             await _autoFill(silent: true);
           }
 
-          // Auto-fill OTP + submit on passcode page
-          if (_isOtpPage(url) && !_otpAutoSubmitting) {
-            await Future.delayed(const Duration(milliseconds: 800));
-            await _autoSubmitOtp();
-          }
-
-          // Check for OTP error message
-          if (_isOtpPage(url)) {
-            await Future.delayed(const Duration(milliseconds: 500));
-            await _controller.runJavaScript(buildOtpErrorDetectScript());
+          // Dùng JS để phát hiện field OTP — không phụ thuộc vào URL
+          await Future.delayed(const Duration(milliseconds: 800));
+          if (mounted) {
+            await _controller.runJavaScript(_detectOtpFieldJs);
           }
         },
         onWebResourceError: (_) => setState(() => _loading = false),
@@ -118,28 +137,56 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _handleJsMessage(String message) {
-    try {
-      if (message.contains('"type":"otpStatus"')) {
-        if (message.contains('"status":"filled"')) {
-          setState(() => _statusText = '⌨️ Đã điền OTP...');
-        } else if (message.contains('"status":"submitted"')) {
-          setState(() { _statusText = '⏳ Đang xác nhận...'; _otpAutoSubmitting = false; });
-          Future.delayed(const Duration(seconds: 3), () {
-            if (mounted) setState(() => _statusText = '');
-          });
-        } else if (message.contains('"status":"noField"') || message.contains('"status":"noButton"')) {
-          setState(() { _statusText = ''; _otpAutoSubmitting = false; });
-        }
-      } else if (message.contains('"type":"otpError"') && message.contains('"detected":true')) {
+    // OTP field phát hiện → auto submit
+    if (message.contains('"type":"otpField"') && message.contains('"detected":true')) {
+      // Chỉ trigger 1 lần cho mỗi URL để tránh spam
+      if (!_otpAutoSubmitting && _lastOtpPageUrl != _currentUrl) {
+        _lastOtpPageUrl = _currentUrl;
+        _otpRetryCount = 0;
+        _autoSubmitOtp();
+      }
+      return;
+    }
+
+    // Phát hiện lỗi OTP → retry
+    if (message.contains('"type":"otpError"') && message.contains('"detected":true')) {
+      if (_otpAutoSubmitting || _lastOtpPageUrl == _currentUrl) {
         _handleOtpError();
       }
-    } catch (_) {}
+      return;
+    }
+
+    // Status feedback từ buildOtpAutoSubmitScript
+    if (message.contains('"type":"otpStatus"')) {
+      if (message.contains('"status":"filled"')) {
+        setState(() => _statusText = '⌨️ Đã điền OTP...');
+      } else if (message.contains('"status":"submitted"')) {
+        setState(() { _statusText = '⏳ Đang xác nhận...'; });
+        // Sau 3s kiểm tra lại xem có lỗi không
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted && _currentUrl == _lastOtpPageUrl) {
+            _controller.runJavaScript(_detectOtpFieldJs);
+          }
+          if (mounted) setState(() { _otpAutoSubmitting = false; });
+        });
+      } else if (message.contains('"status":"noField"')) {
+        setState(() { _statusText = ''; _otpAutoSubmitting = false; });
+      } else if (message.contains('"status":"noButton"')) {
+        setState(() { _statusText = '⚠️ Không thấy nút 認証する'; _otpAutoSubmitting = false; });
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) setState(() => _statusText = '');
+        });
+      }
+    }
   }
 
   Future<void> _autoSubmitOtp() async {
+    if (!mounted) return;
     final otp = context.read<AppProvider>().latestOtp;
+
     if (otp == null) {
       setState(() => _statusText = '⏳ Chờ OTP từ email...');
+      // Chờ tối đa 30 giây
       for (int i = 0; i < 30; i++) {
         await Future.delayed(const Duration(seconds: 1));
         if (!mounted) return;
@@ -149,9 +196,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
           return;
         }
       }
-      if (mounted) setState(() => _statusText = '❌ Không nhận được OTP');
+      if (mounted) setState(() { _statusText = '❌ Không nhận OTP sau 30s'; _otpAutoSubmitting = false; });
       return;
     }
+
     await _doSubmitOtp(otp);
   }
 
@@ -167,12 +215,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   void _handleOtpError() async {
     if (_otpRetryCount >= _maxOtpRetries) {
-      setState(() { _statusText = '❌ Sai OTP ${_maxOtpRetries}x, dừng'; _otpAutoSubmitting = false; });
+      setState(() { _statusText = '❌ Sai OTP ${_maxOtpRetries} lần, dừng lại'; _otpAutoSubmitting = false; });
       return;
     }
     _otpRetryCount++;
     setState(() => _statusText = '❌ Sai OTP, chờ mã mới... (${_otpRetryCount}/$_maxOtpRetries)');
 
+    // Chờ OTP mới (khác mã vừa dùng)
     for (int i = 0; i < 60; i++) {
       await Future.delayed(const Duration(seconds: 1));
       if (!mounted) return;
@@ -182,42 +231,36 @@ class _BrowserScreenState extends State<BrowserScreen> {
         return;
       }
     }
-    if (mounted) setState(() { _statusText = '❌ Không nhận OTP mới sau 60s'; _otpAutoSubmitting = false; });
+    if (mounted) setState(() { _statusText = '❌ Không có OTP mới sau 60s'; _otpAutoSubmitting = false; });
   }
 
   Future<void> _autoFill({bool silent = false}) async {
-    setState(() { _autoFilling = true; _statusText = '📧 Điền email...'; });
+    setState(() { _autoFilling = true; _statusText = '📧 Điền email + password...'; });
     try {
       await Future.delayed(const Duration(milliseconds: 300));
       await _controller.runJavaScript(
           buildAutoFillScript(widget.account.email, widget.account.password));
-      setState(() => _statusText = '✅ Điền xong - Đang login...');
-      await Future.delayed(const Duration(milliseconds: 600));
+      setState(() => _statusText = '🔐 Đang login...');
+      await Future.delayed(const Duration(milliseconds: 700));
 
       await _controller.runJavaScript('''
 (function() {
-  const btns = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
-  for (const btn of btns) {
-    const t = btn.textContent || btn.value || '';
-    if (t.includes('ログイン') || t.includes('送信') || t.toLowerCase().includes('login') || t.toLowerCase().includes('sign in')) {
-      btn.click(); break;
+  var btns = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
+  for (var i = 0; i < btns.length; i++) {
+    var t = btns[i].textContent || btns[i].value || '';
+    if (t.indexOf('ログイン') >= 0 || t.indexOf('送信') >= 0 ||
+        t.toLowerCase().indexOf('login') >= 0 || t.toLowerCase().indexOf('sign in') >= 0) {
+      btns[i].click(); break;
     }
   }
 })();
 ''');
       await Future.delayed(const Duration(seconds: 2));
-      if (mounted) {
-        setState(() => _statusText = '');
-        if (!silent) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('✅ Đã login - Chờ OTP'), duration: Duration(seconds: 2)),
-          );
-        }
-      }
+      if (mounted) setState(() => _statusText = '');
     } catch (_) {
       if (mounted) setState(() => _statusText = '');
     } finally {
-      setState(() => _autoFilling = false);
+      if (mounted) setState(() => _autoFilling = false);
     }
   }
 
@@ -315,7 +358,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   child: Row(children: [
                     const SizedBox(
                       width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2,
                           valueColor: AlwaysStoppedAnimation(AppColors.secondary)),
                     ),
                     const SizedBox(width: 10),
@@ -334,7 +378,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Quick nav URL buttons
+              // Quick nav
               Row(children: [
                 _urlBtn('Login', p.loginUrl, AppColors.primary),
                 const SizedBox(width: 6),
@@ -360,7 +404,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ),
                 ),
               ]),
-              // Browser nav
+              // Browser controls
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
@@ -376,9 +420,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.refresh, size: 18),
-                    onPressed: () => _controller.reload(),
+                    onPressed: () {
+                      // Reset state khi reload để trigger lại detection
+                      setState(() { _lastOtpPageUrl = null; _otpAutoSubmitting = false; });
+                      _controller.reload();
+                    },
                   ),
-                  // OTP display - tap to manually fill
+                  // OTP display — nhấn để fill + submit thủ công
                   Consumer<AppProvider>(
                     builder: (_, prov, __) {
                       final otp = prov.latestOtp;
@@ -418,7 +466,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   Widget _urlBtn(String label, String url, Color color) => GestureDetector(
         onTap: () {
-          if (url.isNotEmpty) _controller.loadRequest(Uri.parse(url));
+          if (url.isNotEmpty) {
+            setState(() { _lastOtpPageUrl = null; _otpAutoSubmitting = false; });
+            _controller.loadRequest(Uri.parse(url));
+          }
         },
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

@@ -376,7 +376,7 @@ String buildOtpAutoSubmitScript(String otp) {
   return '''
 (function() {
   function fill(selector, val) {
-    const el = document.querySelector(selector);
+    var el = document.querySelector(selector);
     if (el) {
       el.focus();
       el.value = val;
@@ -387,34 +387,53 @@ String buildOtpAutoSubmitScript(String otp) {
     }
     return false;
   }
-  const otpSelectors = [
+
+  // Pokémon Center OTP field: id="authCode" / name="dwfrm_factor2Auth_authCode"
+  var otpSelectors = [
+    'input#authCode',
+    'input[name="dwfrm_factor2Auth_authCode"]',
     'input[name="passcode"]', 'input[name="otp"]', 'input[name="code"]',
-    'input[id*="otp"]', 'input[id*="code"]', 'input[id*="passcode"]',
-    'input[placeholder*="パスコード"]', 'input[placeholder*="コード"]',
-    'input[maxlength="6"]',
+    'input[id*="auth"]', 'input[id*="otp"]', 'input[id*="passcode"]',
+    'input[placeholder*="パスコード"]', 'input[maxlength="6"]'
   ];
-  let filled = false;
-  for (const sel of otpSelectors) {
-    if (fill(sel, '$otp')) { filled = true; break; }
+
+  var filled = false;
+  for (var i = 0; i < otpSelectors.length; i++) {
+    if (fill(otpSelectors[i], '$otp')) { filled = true; break; }
   }
+
   if (!filled) {
-    window.FlutterChannel.postMessage(JSON.stringify({type:'otpStatus', status:'noField'}));
+    window.FlutterChannel.postMessage('{"type":"otpStatus","status":"noField"}');
     return;
   }
-  window.FlutterChannel.postMessage(JSON.stringify({type:'otpStatus', status:'filled'}));
-  setTimeout(() => {
-    const keywords = ['認証', '送信', '確認', '次へ', 'submit', 'confirm'];
-    const btns = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
-    for (const btn of btns) {
-      const t = (btn.textContent || btn.value || '').trim();
-      if (keywords.some(k => t.includes(k) || t.toLowerCase().includes(k))) {
-        btn.click();
-        window.FlutterChannel.postMessage(JSON.stringify({type:'otpStatus', status:'submitted'}));
-        return;
+  window.FlutterChannel.postMessage('{"type":"otpStatus","status":"filled"}');
+
+  setTimeout(function() {
+    // Pokémon Center submit: <a id="authBtn">認証する</a>
+    var submitEl = document.querySelector('a#authBtn') ||
+                   document.querySelector('a[id*="auth"]') ||
+                   document.querySelector('button[id*="auth"]');
+
+    if (!submitEl) {
+      // Fallback: tìm theo text
+      var allBtns = Array.from(document.querySelectorAll('button, input[type="submit"], a'));
+      var keywords = ['認証', '送信', '確認', '次へ', 'submit', 'confirm'];
+      for (var j = 0; j < allBtns.length; j++) {
+        var t = (allBtns[j].textContent || allBtns[j].value || '').trim();
+        if (keywords.some(function(k){ return t.indexOf(k) >= 0 || t.toLowerCase().indexOf(k) >= 0; })) {
+          submitEl = allBtns[j];
+          break;
+        }
       }
     }
-    window.FlutterChannel.postMessage(JSON.stringify({type:'otpStatus', status:'noButton'}));
-  }, 600);
+
+    if (submitEl) {
+      submitEl.click();
+      window.FlutterChannel.postMessage('{"type":"otpStatus","status":"submitted"}');
+    } else {
+      window.FlutterChannel.postMessage('{"type":"otpStatus","status":"noButton"}');
+    }
+  }, 500);
 })();
 ''';
 }
