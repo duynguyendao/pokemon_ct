@@ -160,21 +160,24 @@ class AccountCard extends StatelessWidget {
                           return GestureDetector(
                             onTap: () => onModeChange(mode),
                             child: Container(
-                              margin: const EdgeInsets.only(right: 5),
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              margin: EdgeInsets.only(right: ModeChipStyle.rightMargin),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: ModeChipStyle.padding,
+                                vertical: ModeChipStyle.verticalPadding,
+                              ),
                               decoration: BoxDecoration(
                                 color: active ? color.withAlpha(50) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(5),
+                                borderRadius: BorderRadius.circular(ModeChipStyle.borderRadius),
                                 border: Border.all(
                                   color: active ? color : AppColors.divider,
-                                  width: active ? 1.2 : 0.8,
+                                  width: active ? ModeChipStyle.activeBorderWidth : ModeChipStyle.inactiveBorderWidth,
                                 ),
                               ),
                               child: Text(
                                 mode.label,
                                 style: TextStyle(
                                   color: active ? color : AppColors.textSecondary,
-                                  fontSize: 10,
+                                  fontSize: ModeChipStyle.fontSize,
                                   fontWeight: active ? FontWeight.bold : FontWeight.normal,
                                 ),
                               ),

@@ -192,10 +192,11 @@ class ImapService {
     return results;
   }
 
-  /// Tìm email theo keyword + khoảng thời gian
+  /// Tìm email theo keyword trong subject/body + khoảng thời gian
   Future<List<EmailSearchResult>> searchEmails({
     required ImapConfig config,
     String subjectKeyword = '',
+    String bodyKeyword = '',
     DateTime? from,
     DateTime? to,
     int maxMessages = 30,
@@ -266,6 +267,14 @@ class ImapService {
           final subject = msg.decodeSubject() ?? '';
           final sender = msg.from?.firstOrNull?.email ?? '';
           final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
+
+          // Lọc theo body keyword nếu có
+          if (bodyKeyword.isNotEmpty) {
+            if (!body.toLowerCase().contains(bodyKeyword.toLowerCase()) &&
+                !subject.toLowerCase().contains(bodyKeyword.toLowerCase())) {
+              continue;
+            }
+          }
 
           final otp = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
           results.add(EmailSearchResult(

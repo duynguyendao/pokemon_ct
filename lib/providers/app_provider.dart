@@ -297,6 +297,7 @@ class AppProvider extends ChangeNotifier {
 
   Future<List<EmailSearchResult>> searchEmails({
     String subjectKeyword = '',
+    String bodyKeyword = '',
     DateTime? from,
     DateTime? to,
     int maxMessages = 20,
@@ -306,6 +307,7 @@ class AppProvider extends ChangeNotifier {
     return _imap.searchEmails(
       config: config,
       subjectKeyword: subjectKeyword,
+      bodyKeyword: bodyKeyword,
       from: from,
       to: to,
       maxMessages: maxMessages,

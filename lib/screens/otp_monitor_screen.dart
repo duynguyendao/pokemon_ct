@@ -33,6 +33,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
 
   // Search
   final _searchSubjectCtrl = TextEditingController(text: 'ポケモンセンター');
+  final _searchBodyCtrl = TextEditingController();
   DateTime _searchFrom = DateTime.now().subtract(const Duration(hours: 1));
   DateTime _searchTo = DateTime.now();
   List<EmailSearchResult> _searchResults = [];
@@ -77,6 +78,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     _passCtrl.dispose();
     _pollCtrl.dispose();
     _searchSubjectCtrl.dispose();
+    _searchBodyCtrl.dispose();
     _loginUrlCtrl.dispose();
     _lotteryUrlCtrl.dispose();
     _lotteryResultUrlCtrl.dispose();
@@ -141,6 +143,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     try {
       final results = await p.searchEmails(
         subjectKeyword: _searchSubjectCtrl.text.trim(),
+        bodyKeyword: _searchBodyCtrl.text.trim(),
         from: _searchFrom,
         to: _searchTo,
         maxMessages: 30,
@@ -619,9 +622,19 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
                 controller: _searchSubjectCtrl,
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
-                  labelText: 'Từ khoá tiêu đề / nội dung',
+                  labelText: 'Từ khoá tiêu đề',
                   hintText: 'ポケモンセンター hoặc パスコード',
-                  prefixIcon: Icon(Icons.search, color: AppColors.textSecondary),
+                  prefixIcon: Icon(Icons.subject, color: AppColors.textSecondary),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _searchBodyCtrl,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Từ khoá trong nội dung email',
+                  hintText: 'Ví dụ: confirmation, verify, code',
+                  prefixIcon: Icon(Icons.mail_outline, color: AppColors.textSecondary),
                 ),
               ),
               const SizedBox(height: 12),

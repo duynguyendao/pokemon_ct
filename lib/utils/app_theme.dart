@@ -1,5 +1,16 @@
 import 'package:flutter/material.dart';
 
+// Mode chip styling — global configuration
+class ModeChipStyle {
+  static const double padding = 7;
+  static const double verticalPadding = 2;
+  static const double borderRadius = 5;
+  static const double activeBorderWidth = 1.2;
+  static const double inactiveBorderWidth = 0.8;
+  static const double rightMargin = 5;
+  static const double fontSize = 10;
+}
+
 class AppColors {
   static const Color primary = Color(0xFFFF6B35);
   static const Color secondary = Color(0xFF004E89);

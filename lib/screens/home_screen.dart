@@ -16,7 +16,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   String _searchQuery = '';
   String _statusFilter = 'all';
   String? _groupFilter;
@@ -29,6 +30,18 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _runningAll = false;
   int _runAllIndex = 0;
   List<Account> _runAllList = [];
+
+  // Pokeball animation
+  late AnimationController _pokeballController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pokeballController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    )..repeat();
+  }
 
   List<Account> _filtered(AppProvider p) {
     var list = p.accounts;
@@ -412,6 +425,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _pokeballController.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -441,7 +455,13 @@ class _HomeScreenState extends State<HomeScreen> {
               )
             : Row(
                 children: [
-                  const Text('⚡', style: TextStyle(fontSize: 22)),
+                  AnimatedBuilder(
+                    animation: _pokeballController,
+                    builder: (_, __) => Transform.rotate(
+                      angle: _pokeballController.value * 6.28,
+                      child: const Text('🎡', style: TextStyle(fontSize: 22)),
+                    ),
+                  ),
                   const SizedBox(width: 10),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
