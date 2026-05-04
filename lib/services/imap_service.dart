@@ -22,7 +22,7 @@ class ImapConfig {
     required this.username,
     required this.password,
     this.isSecure = true,
-    this.pollIntervalSeconds = 30,
+    this.pollIntervalSeconds = 5,
   });
 }
 
@@ -46,13 +46,14 @@ class ImapService {
   // ── Operations client (fetch / search / mark-read) ─────────────────────────
   ImapClient? _client;
   bool _polling = false;
+  int _lastSeenUid = 0; // tracks highest UID processed — only fetch newer
 
   // ── IDLE client (dedicated push listener) ──────────────────────────────────
   ImapClient? _idleClient;
   bool _idleRunning = false;
 
   // ── Shared ────────────────────────────────────────────────────────────────
-  Timer? _pollTimer;        // fallback poll as safety net
+  Timer? _pollTimer;
   ImapConfig? _config;
   List<FilterRule> _rules = [];
   bool _isRunning = false;
@@ -73,14 +74,12 @@ class ImapService {
     _isRunning = true;
 
     await _connect();
+    _startIdleLoop(); // push: fires _pollNew() the moment mail arrives
 
-    // IDLE loop runs in background — provides near-instant push notification
-    _startIdleLoop();
-
-    // Fallback poll (30s) in case IDLE gaps or server doesn't support IDLE
+    // Fallback poll every pollIntervalSeconds in case of IDLE gaps
     _pollTimer = Timer.periodic(
       Duration(seconds: config.pollIntervalSeconds),
-      (_) => _poll(),
+      (_) => _pollNew(),
     );
   }
 
@@ -114,6 +113,8 @@ class ImapService {
       await client.selectMailboxByPath('INBOX');
       _client = client;
       _log('CONNECT', 'Ready ✓');
+      // Snapshot current max UID so we only process truly new mail
+      await _initLastSeenUid();
     } catch (e) {
       _log('CONNECT', 'Error: $e');
       try { await client.logout(); } catch (_) {}
@@ -121,61 +122,81 @@ class ImapService {
     }
   }
 
-  Future<List<OtpEntry>> fetchNow() async {
-    if (_config == null) return [];
-    _log('FETCH', 'Manual fetch...');
+  // Reconnect without touching _lastSeenUid — preserves OTP detection continuity
+  Future<void> _reconnect() async {
+    final config = _config!;
+    await _closeClient();
+    _log('RECONNECT', 'Reconnecting (UID preserved: $_lastSeenUid)...');
+    final client = ImapClient(isLogEnabled: false);
     try {
-      if (_client == null) await _connect();
-      return await _poll();
+      await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
+      await client.login(config.username, config.password);
+      await client.selectMailboxByPath('INBOX');
+      _client = client;
+      _log('RECONNECT', 'OK ✓');
     } catch (e) {
-      _log('FETCH', 'Dead connection ($e), reconnecting...');
-      try {
-        await _closeClient();
-        await _connect();
-        return await _poll();
-      } catch (e2) {
-        _log('FETCH', 'Retry failed: $e2');
-        await _closeClient();
-        return [];
-      }
+      _log('RECONNECT', 'Error: $e');
+      try { await client.logout(); } catch (_) {}
+      rethrow;
     }
   }
 
-  Future<List<OtpEntry>> _poll() async {
+  // Record current max UID — next poll will only fetch UIDs above this
+  Future<void> _initLastSeenUid() async {
+    try {
+      final result = await _client!.uidSearchMessages(searchCriteria: 'ALL');
+      final uids = result.matchingSequence?.toList() ?? [];
+      _lastSeenUid = uids.isNotEmpty ? uids.last : 0;
+      _log('CONNECT', 'Last UID: $_lastSeenUid');
+    } catch (e) {
+      _log('CONNECT', 'UID init error: $e — will use SINCE fallback');
+      _lastSeenUid = 0;
+    }
+  }
+
+  // ── Core fetch: only new UIDs (like PC server's "UID lastUid+1:*") ─────────
+
+  Future<List<OtpEntry>> _pollNew() async {
     if (_polling) { _log('POLL', 'Skipped (busy)'); return []; }
     _polling = true;
     final results = <OtpEntry>[];
     try {
-      if (_client == null) await _connect();
+      if (_client == null) await _reconnect(); // preserves _lastSeenUid
+      await _client!.selectMailboxByPath('INBOX');
 
-      final mailbox = await _client!.selectMailboxByPath('INBOX');
-      final count = mailbox.messagesExists;
-      _log('POLL', 'Inbox: $count messages');
-      if (count == 0) return results;
+      // Build search: UID after last seen, or last 5 min if no UID yet
+      final String searchCrit;
+      if (_lastSeenUid > 0) {
+        searchCrit = 'UID ${_lastSeenUid + 1}:*';
+      } else {
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        final d = DateTime.now().subtract(const Duration(minutes: 5));
+        searchCrit = 'SINCE ${d.day}-${months[d.month - 1]}-${d.year}';
+      }
+      _log('POLL', 'Search: $searchCrit');
 
-      final since = DateTime.now().subtract(const Duration(hours: 1));
-      final criteria = SearchQueryBuilder.from(
-        '', SearchQueryType.allTextHeaders, since: since,
-      ).toString();
+      // UID search returns actual UIDs
+      final searchResult = await _client!.uidSearchMessages(searchCriteria: searchCrit);
+      final uids = searchResult.matchingSequence?.toList() ?? [];
 
-      final searchResult = await _client!.searchMessages(
-        searchCriteria: criteria.isEmpty ? 'ALL' : criteria,
-      );
-      final seq = searchResult.matchingSequence;
-      if (seq == null || seq.isEmpty) {
-        _log('POLL', 'No recent messages');
+      // Filter: only UIDs strictly above last seen
+      final newUids = _lastSeenUid > 0
+          ? uids.where((u) => u > _lastSeenUid).toList()
+          : uids;
+
+      if (newUids.isEmpty) {
+        _log('POLL', 'No new messages');
         return results;
       }
+      _log('POLL', 'Fetching ${newUids.length} new UIDs: $newUids');
 
-      final ids = seq.toList();
-      final limited = ids.length > 20 ? ids.sublist(ids.length - 20) : ids;
-      _log('POLL', 'Fetching ${limited.length} messages...');
-
-      final fetchResult = await _client!.fetchMessages(
-        MessageSequence.fromIds(limited),
-        '(BODY.PEEK[])',
-      );
+      // UID fetch — isUidSequence: true so enough_mail uses "UID FETCH"
+      final seq = MessageSequence.fromIds(newUids, isUid: true);
+      final fetchResult = await _client!.fetchMessages(seq, '(BODY.PEEK[])');
       _log('POLL', 'Got ${fetchResult.messages.length}');
+
+      // Track highest UID processed
+      if (uids.isNotEmpty) _lastSeenUid = uids.reduce((a, b) => a > b ? a : b);
 
       final toMarkRead = <int>[];
       for (final msg in fetchResult.messages) {
@@ -184,13 +205,13 @@ class ImapService {
           results.add(entry);
           _log('POLL', 'OTP ${entry.code} → ${entry.recipient}');
           _otpController.add(entry);
-          if (msg.sequenceId != null) toMarkRead.add(msg.sequenceId!);
+          if (msg.uid != null) toMarkRead.add(msg.uid!);
         }
       }
       if (toMarkRead.isNotEmpty) {
         try {
           await _client!.store(
-            MessageSequence.fromIds(toMarkRead),
+            MessageSequence.fromIds(toMarkRead, isUid: true),
             [r'\Seen'],
             action: StoreAction.add,
           );
@@ -205,58 +226,35 @@ class ImapService {
     return results;
   }
 
-  // ── Direct fetch by sequence ID (no search) ──────────────────────────────
-
-  // Fetch only messages with seq IDs fromSeq..toSeq — no SEARCH round-trip.
-  // Called by the IDLE loop when it knows exact sequence IDs of new mail.
-  Future<void> _fetchBySeq(int fromSeq, int toSeq) async {
-    if (_polling) { _log('FETCH_SEQ', 'Skipped (busy)'); return; }
-    _polling = true;
+  Future<List<OtpEntry>> fetchNow() async {
+    if (_config == null) return [];
+    _log('FETCH', 'Manual fetch...');
     try {
-      if (_client == null) await _connect();
-      await _client!.selectMailboxByPath('INBOX');
-
-      final seq = MessageSequence.fromRange(fromSeq, toSeq);
-      _log('FETCH_SEQ', 'Fetching seq $fromSeq:$toSeq...');
-      final fetchResult = await _client!.fetchMessages(seq, '(BODY.PEEK[])');
-      _log('FETCH_SEQ', 'Got ${fetchResult.messages.length}');
-
-      final toMarkRead = <int>[];
-      for (final msg in fetchResult.messages) {
-        final entry = _extractOtp(msg);
-        if (entry != null && !_otpController.isClosed) {
-          _log('FETCH_SEQ', 'OTP ${entry.code} → ${entry.recipient}');
-          _otpController.add(entry);
-          if (msg.sequenceId != null) toMarkRead.add(msg.sequenceId!);
-        }
-      }
-      if (toMarkRead.isNotEmpty) {
-        try {
-          await _client!.store(
-            MessageSequence.fromIds(toMarkRead),
-            [r'\Seen'],
-            action: StoreAction.add,
-          );
-        } catch (_) {}
-      }
+      if (_client == null) await _reconnect();
+      return await _pollNew();
     } catch (e) {
-      _log('FETCH_SEQ', 'Error: $e');
-      await _closeClient();
-    } finally {
-      _polling = false;
+      _log('FETCH', 'Error ($e), reconnecting...');
+      try {
+        await _reconnect();
+        return await _pollNew();
+      } catch (e2) {
+        _log('FETCH', 'Retry failed: $e2');
+        await _closeClient();
+        return [];
+      }
     }
   }
 
   // ── IMAP IDLE (server push) ───────────────────────────────────────────────
   //
-  // Uses a dedicated second connection that stays in IMAP IDLE mode.
-  // The server pushes an ImapMessagesExistEvent the moment new mail arrives.
-  // We exit IDLE, call _fetchBySeq() directly — no SEARCH round-trip needed.
-  // This gives sub-second detection latency from the server side.
+  // Dedicated second connection stays in IMAP IDLE.
+  // Server fires ImapMessagesExistEvent the instant new mail arrives.
+  // We exit IDLE → call _pollNew() → re-enter IDLE.
+  // Detection latency: sub-second from Gmail receiving the email.
 
   void _startIdleLoop() {
     _idleRunning = true;
-    _runIdleLoop(); // intentionally unawaited — runs in background
+    _runIdleLoop();
   }
 
   Future<void> _closeIdleClient() async {
@@ -271,13 +269,13 @@ class ImapService {
   Future<void> _connectIdleClient() async {
     final config = _config!;
     await _closeIdleClient();
-    _log('IDLE', 'Connecting idle client...');
+    _log('IDLE', 'Connecting...');
     final client = ImapClient(isLogEnabled: false);
     await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
     await client.login(config.username, config.password);
     await client.selectMailboxByPath('INBOX');
     _idleClient = client;
-    _log('IDLE', 'Idle client ready ✓');
+    _log('IDLE', 'Ready ✓');
   }
 
   Future<void> _runIdleLoop() async {
@@ -291,21 +289,13 @@ class ImapService {
 
         final signal = Completer<bool>(); // true = new mail, false = keepalive/lost
 
-        int pushedOldExists = 0;
-        int pushedNewExists = 0;
-
-        // Server fires this when "* N EXISTS" arrives during IDLE
         existsSub = _idleClient!.eventBus
             .on<ImapMessagesExistEvent>()
             .listen((event) {
-          _log('IDLE', '⚡ Push: ${event.newMessagesExists} msgs '
-              '(was ${event.oldMessagesExists})');
-          pushedOldExists = event.oldMessagesExists;
-          pushedNewExists = event.newMessagesExists;
+          _log('IDLE', '⚡ Push: ${event.newMessagesExists} msgs');
           if (!signal.isCompleted) signal.complete(true);
         });
 
-        // Reconnect if server drops the IDLE connection
         lostSub = _idleClient!.eventBus
             .on<ImapConnectionLostEvent>()
             .listen((_) {
@@ -313,45 +303,42 @@ class ImapService {
           if (!signal.isCompleted) signal.complete(false);
         });
 
-        // IMAP servers terminate IDLE after 30 min — we restart every 25 min
+        // Restart IDLE every 25 min — servers drop IDLE at 30 min
         keepaliveTimer = Timer(const Duration(minutes: 25), () {
           if (!signal.isCompleted) signal.complete(false);
         });
 
         _log('IDLE', 'Entering IDLE...');
         final idleFuture = _idleClient!.idleStart();
-
-        // Await signal: either new mail push, connection lost, or keepalive
         final hasNewMail = await signal.future;
 
         existsSub.cancel();
         lostSub.cancel();
         keepaliveTimer.cancel();
 
-        // Exit IDLE
         try { await _idleClient!.idleDone(); } catch (_) {}
         try { await idleFuture.timeout(const Duration(seconds: 5)); } catch (_) {}
 
         if (!hasNewMail) {
-          // Connection lost — force reconnect on next iteration
-          if (_idleClient != null) {
-            try { await _idleClient!.logout(); } catch (_) {}
-            _idleClient = null;
+          // Connection lost or keepalive — reconnect idle client
+          final old = _idleClient;
+          _idleClient = null;
+          if (old != null) {
+            try { await old.logout(); } catch (_) {}
           }
           if (_isRunning) await Future.delayed(const Duration(seconds: 2));
           continue;
         }
 
-        // New mail confirmed — fetch ONLY the new messages by sequence ID.
-        // No SEARCH round-trip: pushedOldExists+1 → pushedNewExists is exact.
-        _log('IDLE', 'Fetching seq ${pushedOldExists + 1}:$pushedNewExists');
-        _fetchBySeq(pushedOldExists + 1, pushedNewExists); // unawaited
+        // New mail — trigger UID-based fetch immediately
+        _log('IDLE', 'Triggering pollNew...');
+        _pollNew(); // unawaited
 
       } catch (e) {
         existsSub?.cancel();
         lostSub?.cancel();
         keepaliveTimer?.cancel();
-        _log('IDLE', 'Error: $e — reconnecting in 5s...');
+        _log('IDLE', 'Error: $e — retry in 5s...');
         final old = _idleClient;
         _idleClient = null;
         if (old != null) {
@@ -425,9 +412,7 @@ class ImapService {
           final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
           if (bodyKeyword.isNotEmpty &&
               !body.toLowerCase().contains(bodyKeyword.toLowerCase()) &&
-              !subject.toLowerCase().contains(bodyKeyword.toLowerCase())) {
-            continue;
-          }
+              !subject.toLowerCase().contains(bodyKeyword.toLowerCase())) { continue; }
           final otp = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
           results.add(EmailSearchResult(
             subject: subject.isEmpty ? '(no subject)' : subject,
@@ -447,7 +432,7 @@ class ImapService {
       if (wasRunning && _config != null) {
         _pollTimer = Timer.periodic(
           Duration(seconds: _config!.pollIntervalSeconds),
-          (_) => _poll(),
+          (_) => _pollNew(),
         );
       }
     }
