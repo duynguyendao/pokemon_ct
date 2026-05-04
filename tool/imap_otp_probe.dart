@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
-import 'package:enough_mail/enough_mail.dart';
+import 'package:pokemon_ct/services/fast_imap_client.dart';
 import 'package:pokemon_ct/services/otp_extractor.dart';
 
 Future<void> main(List<String> args) async {
@@ -19,6 +20,8 @@ Future<void> main(List<String> args) async {
   final maxMessages = int.tryParse(opts['max'] ?? '') ?? 30;
   final watch = opts.containsKey('watch');
   final watchSeconds = int.tryParse(opts['watch'] ?? '') ?? 120;
+  final pollSeconds = max(1, int.tryParse(opts['poll'] ?? '') ?? 1);
+  final raw = opts.containsKey('raw');
 
   if (user.isEmpty || password.isEmpty) {
     stderr.writeln('Missing --user/--password or IMAP_USER/IMAP_PASS.');
@@ -27,89 +30,93 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  final client = ImapClient(
-    isLogEnabled: opts.containsKey('raw'),
-    defaultResponseTimeout: const Duration(seconds: 25),
-  );
+  final client = FastImapClient(debugLog: raw ? stdout.writeln : null);
   final seenUids = <int>{};
+  var lastUid = 0;
 
   try {
     stdout.writeln('Connecting $host:$port as $user');
-    await client
-        .connectToServer(host, port, isSecure: port == 993)
-        .timeout(const Duration(seconds: 20));
-    await client.login(user, password).timeout(const Duration(seconds: 25));
-    final mailbox = await client
-        .selectMailboxByPath('INBOX')
-        .timeout(const Duration(seconds: 25));
+    await client.connect(
+      FastImapConfig(
+        host: host,
+        port: port,
+        username: user,
+        password: password,
+        isSecure: port == 993,
+      ),
+    );
+    final mailbox = await client.selectInbox();
+    lastUid = mailbox.uidNext > 1
+        ? mailbox.uidNext - 1
+        : await client.fetchLastUid();
     stdout.writeln(
-      'INBOX selected: messages=${mailbox.messagesExists}, '
-      'recent=${mailbox.messagesRecent}, uidNext=${mailbox.uidNext}',
+      'INBOX selected: messages=${mailbox.exists}, uidNext=${mailbox.uidNext}, '
+      'lastUid=$lastUid',
     );
 
+    final recentFound = await _printMessages(
+      await client.fetchRecentMessages(maxMessages: maxMessages),
+      minutes: minutes,
+      seenUids: seenUids,
+    );
+    if (!watch && recentFound == 0) {
+      stdout.writeln('No OTP found in last $minutes minutes.');
+    }
+
+    if (!watch) return;
+
+    stdout.writeln('');
+    stdout.writeln(
+      'Watching for $watchSeconds seconds, poll=${pollSeconds}s...',
+    );
     final deadline = DateTime.now().add(Duration(seconds: watchSeconds));
-    do {
-      final found = await _fetchAndPrintRecentOtps(
-        client,
+    while (DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(Duration(seconds: pollSeconds));
+      final uids = await client.searchNewUids(lastUid);
+      if (uids.isEmpty) continue;
+
+      lastUid = max(lastUid, uids.reduce(max));
+      await _printMessages(
+        await client.fetchMessagesByUid(uids),
         minutes: minutes,
-        maxMessages: maxMessages,
         seenUids: seenUids,
       );
-      if (!watch && found == 0) {
-        stdout.writeln('No OTP found in last $minutes minutes.');
-      }
-      if (!watch) break;
-
-      await Future<void>.delayed(const Duration(seconds: 2));
-    } while (DateTime.now().isBefore(deadline));
+    }
   } catch (e, st) {
     stderr.writeln('Probe failed: $e');
     if (opts.containsKey('stack')) stderr.writeln(st);
     exitCode = 1;
   } finally {
-    try {
-      await client.logout();
-    } catch (_) {}
+    await client.logout();
   }
 }
 
-Future<int> _fetchAndPrintRecentOtps(
-  ImapClient client, {
+Future<int> _printMessages(
+  List<FastImapMessage> messages, {
   required int minutes,
-  required int maxMessages,
   required Set<int> seenUids,
 }) async {
-  await client
-      .selectMailboxByPath('INBOX')
-      .timeout(const Duration(seconds: 25));
   final since = DateTime.now().subtract(Duration(minutes: minutes));
-  final fetchResult = await client.fetchRecentMessages(
-    messageCount: maxMessages,
-    criteria: '(UID ENVELOPE BODY.PEEK[])',
-    responseTimeout: const Duration(seconds: 25),
-  );
-
   var found = 0;
-  for (final msg in fetchResult.messages.reversed) {
+
+  for (final msg in messages.reversed) {
     final uid = msg.uid;
     if (uid != null && !seenUids.add(uid)) continue;
+    if (msg.date.isBefore(since)) continue;
 
-    final date = msg.decodeDate() ?? DateTime.now();
-    if (date.isBefore(since)) continue;
-
-    final subject = msg.decodeSubject() ?? '';
-    final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
-    final otp = extractOtpFromText(body) ?? extractOtpFromText(subject);
+    final otp = extractOtpFromText(msg.body) ?? extractOtpFromText(msg.subject);
     if (otp == null) continue;
 
     found++;
     stdout.writeln('');
     stdout.writeln('OTP FOUND: $otp');
     stdout.writeln('  uid: ${uid ?? '(no uid)'}');
-    stdout.writeln('  date: ${date.toIso8601String()}');
-    stdout.writeln('  from: ${_addressesToText(msg.from)}');
-    stdout.writeln('  to: ${_addressesToText(msg.to)}');
-    stdout.writeln('  subject: ${subject.isEmpty ? '(no subject)' : subject}');
+    stdout.writeln('  date: ${msg.date.toIso8601String()}');
+    stdout.writeln('  from: ${msg.sender}');
+    stdout.writeln('  to: ${msg.recipient}');
+    stdout.writeln(
+      '  subject: ${msg.subject.isEmpty ? '(no subject)' : msg.subject}',
+    );
   }
   return found;
 }
@@ -135,11 +142,6 @@ Map<String, String> _parseArgs(List<String> args) {
   return opts;
 }
 
-String _addressesToText(List<MailAddress>? addresses) {
-  if (addresses == null || addresses.isEmpty) return '';
-  return addresses.map((a) => a.email).whereType<String>().join(', ');
-}
-
 void _printUsage() {
   stdout.writeln(r'''
 Usage:
@@ -150,8 +152,9 @@ Options:
   --port 993                Default: 993
   --minutes 20              Only inspect recent mail in this window
   --max 30                  Number of recent messages to fetch
-  --watch 120               Poll for this many seconds
-  --raw                     Print enough_mail protocol logs
+  --watch 120               Poll new UID mail for this many seconds
+  --poll 1                  Watch poll interval in seconds
+  --raw                     Print raw IMAP protocol logs
 
 PowerShell without putting password in command history:
   $env:IMAP_USER="you@gmail.com"
