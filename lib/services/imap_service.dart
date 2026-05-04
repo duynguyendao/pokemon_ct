@@ -48,7 +48,7 @@ class ImapService {
   ImapConfig? _config;
   List<FilterRule> _rules = [];
   bool _isRunning = false;
-  bool _polling = false; // prevent concurrent polls
+  bool _polling = false;
 
   final _otpController = StreamController<OtpEntry>.broadcast();
   Stream<OtpEntry> get otpStream => _otpController.stream;
@@ -76,7 +76,6 @@ class ImapService {
     await _closeClient();
   }
 
-  // Properly close connection and free the slot
   Future<void> _closeClient() async {
     final old = _client;
     _client = null;
@@ -90,7 +89,6 @@ class ImapService {
 
   Future<void> _connect() async {
     final config = _config!;
-    // Always close existing before opening a new one
     await _closeClient();
     _log('CONNECT', 'Connecting to ${config.host}:${config.port}...');
     final client = ImapClient(isLogEnabled: false);
@@ -99,7 +97,7 @@ class ImapService {
       _log('CONNECT', 'Connected ✓');
       await client.login(config.username, config.password);
       _log('CONNECT', 'Logged in ✓');
-      await client.selectInbox();
+      await client.selectMailboxByPath('INBOX');
       _log('CONNECT', 'Inbox selected ✓');
       _client = client;
     } catch (e) {
@@ -120,9 +118,8 @@ class ImapService {
   }
 
   Future<List<OtpEntry>> _poll() async {
-    // Skip if already polling (timer fires while previous poll still running)
     if (_polling) {
-      _log('POLL', 'Skipped (previous poll still running)');
+      _log('POLL', 'Skipped (busy)');
       return [];
     }
     _polling = true;
@@ -130,23 +127,40 @@ class ImapService {
     try {
       if (_client == null) await _connect();
 
-      final mailbox = await _client!.selectInbox();
+      final mailbox = await _client!.selectMailboxByPath('INBOX');
       final count = mailbox.messagesExists;
       _log('POLL', 'Messages: $count');
       if (count == 0) return results;
 
-      final start = (count > 20 ? count - 19 : 1);
-      final sequence = MessageSequence.fromRange(start, count);
-      _log('POLL', 'Fetching $start-$count...');
+      // Search for recent emails using server-side date filter
+      final since = DateTime.now().subtract(const Duration(hours: 1));
+      final searchBuilder = SearchQueryBuilder.from(
+        '',
+        SearchQueryType.allTextHeaders,
+        since: since,
+      );
+      final criteria = searchBuilder.toString();
+      _log('POLL', 'Searching: $criteria');
 
-      final fetchResult = await _client!.fetchMessages(sequence, 'ENVELOPE BODY[]');
+      final searchResult = await _client!.searchMessages(
+        searchCriteria: criteria.isEmpty ? 'ALL' : criteria,
+      );
+      final seq = searchResult.matchingSequence;
+      if (seq == null || seq.isEmpty) {
+        _log('POLL', 'No recent messages');
+        return results;
+      }
+
+      final ids = seq.toList();
+      // Limit to last 20 to avoid heavy fetch
+      final limited = ids.length > 20 ? ids.sublist(ids.length - 20) : ids;
+      _log('POLL', 'Fetching ${limited.length} recent messages...');
+
+      final batch = MessageSequence.fromIds(limited);
+      final fetchResult = await _client!.fetchMessages(batch, '(BODY.PEEK[])');
       _log('POLL', 'Got ${fetchResult.messages.length} messages');
 
-      final cutoff = DateTime.now().subtract(const Duration(hours: 1));
       for (final msg in fetchResult.messages) {
-        final msgDate = msg.decodeDate();
-        if (msgDate != null && msgDate.isBefore(cutoff)) continue;
-
         final entry = _extractOtp(msg);
         if (entry != null && !_otpController.isClosed) {
           results.add(entry);
@@ -156,7 +170,6 @@ class ImapService {
       }
     } catch (e) {
       _log('POLL', 'Error: $e');
-      // Properly close the broken connection
       await _closeClient();
     } finally {
       _polling = false;
@@ -164,70 +177,92 @@ class ImapService {
     return results;
   }
 
-  /// Tìm email. Tạm dừng poll khi search để tránh "too many connections"
+  /// Tìm email theo keyword + khoảng thời gian
   Future<List<EmailSearchResult>> searchEmails({
     required ImapConfig config,
     String subjectKeyword = '',
     DateTime? from,
     DateTime? to,
-    int maxMessages = 20,
+    int maxMessages = 30,
   }) async {
     final results = <EmailSearchResult>[];
 
-    // Pause poll timer and close existing connection to free the slot
+    // Pause poll timer to free connection slot
     final wasRunning = _isRunning;
     _pollTimer?.cancel();
     _pollTimer = null;
-    _log('SEARCH', 'Paused poll timer, closing existing connection...');
+    _log('SEARCH', 'Paused poll, closing existing connection...');
     await _closeClient();
 
-    _log('SEARCH', 'Connecting for search...');
+    _log('SEARCH', 'Connecting...');
     final client = ImapClient(isLogEnabled: false);
     try {
       await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
       _log('SEARCH', 'Connected ✓');
       await client.login(config.username, config.password);
       _log('SEARCH', 'Logged in ✓');
-      final mailbox = await client.selectInbox();
+      await client.selectMailboxByPath('INBOX');
       _log('SEARCH', 'Inbox selected ✓');
-      final count = mailbox.messagesExists;
-      _log('SEARCH', 'Total messages: $count');
-      if (count == 0) return results;
 
-      final fetchCount = count < maxMessages ? count : maxMessages;
-      final startSeq = count - fetchCount + 1;
-      final sequence = MessageSequence.fromRange(startSeq, count);
-      _log('SEARCH', 'Fetching $startSeq-$count ($fetchCount messages)...');
-      final fetchResult = await client.fetchMessages(sequence, 'ENVELOPE BODY[]');
-      _log('SEARCH', 'Fetched ${fetchResult.messages.length} messages');
+      // Build server-side search criteria (date range + keyword)
+      final searchBuilder = SearchQueryBuilder.from(
+        subjectKeyword,
+        SearchQueryType.allTextHeaders,
+        since: from,
+        before: to?.add(const Duration(days: 1)),
+      );
+      final criteria = searchBuilder.toString();
+      _log('SEARCH', 'Criteria: ${criteria.isEmpty ? "ALL" : criteria}');
 
+      final searchResult = await client.searchMessages(
+        searchCriteria: criteria.isEmpty ? 'ALL' : criteria,
+      );
+      final seq = searchResult.matchingSequence;
+      if (seq == null || seq.isEmpty) {
+        _log('SEARCH', 'No matches on server');
+        return results;
+      }
+
+      _log('SEARCH', 'Server matched ${seq.length} emails');
+
+      // Limit to maxMessages, take latest
+      final ids = seq.toList();
+      final limited = ids.length > maxMessages
+          ? ids.sublist(ids.length - maxMessages)
+          : ids;
+
+      // Batch fetch (25 per batch)
+      const batchSize = 25;
       final fromDate = from ?? DateTime.now().subtract(const Duration(hours: 24));
       final toDate = to ?? DateTime.now();
 
-      for (final msg in fetchResult.messages.reversed) {
-        final msgDate = msg.decodeDate() ?? DateTime.now();
-        if (msgDate.isBefore(fromDate) || msgDate.isAfter(toDate)) continue;
+      for (var i = 0; i < limited.length; i += batchSize) {
+        final end = (i + batchSize < limited.length) ? i + batchSize : limited.length;
+        final batchIds = MessageSequence.fromIds(limited.sublist(i, end));
+        _log('SEARCH', 'Batch ${i ~/ batchSize + 1}: fetching ${end - i} messages...');
 
-        final subject = msg.decodeSubject() ?? '';
-        final sender = msg.from?.firstOrNull?.email ?? '';
-        final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
+        final fetchResult = await client.fetchMessages(batchIds, '(BODY.PEEK[])');
+        _log('SEARCH', 'Got ${fetchResult.messages.length}');
 
-        if (subjectKeyword.isNotEmpty &&
-            !subject.toLowerCase().contains(subjectKeyword.toLowerCase()) &&
-            !body.toLowerCase().contains(subjectKeyword.toLowerCase())) {
-          continue;
+        for (final msg in fetchResult.messages.reversed) {
+          final msgDate = msg.decodeDate() ?? DateTime.now();
+          if (msgDate.isBefore(fromDate) || msgDate.isAfter(toDate)) continue;
+
+          final subject = msg.decodeSubject() ?? '';
+          final sender = msg.from?.firstOrNull?.email ?? '';
+          final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
+
+          final otp = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
+          results.add(EmailSearchResult(
+            subject: subject.isEmpty ? '(no subject)' : subject,
+            sender: sender,
+            body: body.length > 500 ? body.substring(0, 500) : body,
+            date: msgDate,
+            otpFound: otp,
+          ));
         }
-
-        final otp = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
-        results.add(EmailSearchResult(
-          subject: subject.isEmpty ? '(no subject)' : subject,
-          sender: sender,
-          body: body.length > 300 ? body.substring(0, 300) : body,
-          date: msgDate,
-          otpFound: otp,
-        ));
       }
-      _log('SEARCH', 'Found ${results.length} matching emails');
+      _log('SEARCH', '✓ Found ${results.length} matching emails');
     } catch (e) {
       _log('SEARCH', 'ERROR: $e');
       rethrow;
@@ -237,7 +272,7 @@ class ImapService {
         _log('SEARCH', 'Logged out ✓');
       } catch (_) {}
 
-      // Resume poll timer if it was running
+      // Resume poll timer
       if (wasRunning && _config != null) {
         _log('SEARCH', 'Resuming poll timer...');
         _pollTimer = Timer.periodic(
