@@ -205,11 +205,53 @@ class ImapService {
     return results;
   }
 
+  // ── Direct fetch by sequence ID (no search) ──────────────────────────────
+
+  // Fetch only messages with seq IDs fromSeq..toSeq — no SEARCH round-trip.
+  // Called by the IDLE loop when it knows exact sequence IDs of new mail.
+  Future<void> _fetchBySeq(int fromSeq, int toSeq) async {
+    if (_polling) { _log('FETCH_SEQ', 'Skipped (busy)'); return; }
+    _polling = true;
+    try {
+      if (_client == null) await _connect();
+      await _client!.selectMailboxByPath('INBOX');
+
+      final seq = MessageSequence.fromRange(fromSeq, toSeq);
+      _log('FETCH_SEQ', 'Fetching seq $fromSeq:$toSeq...');
+      final fetchResult = await _client!.fetchMessages(seq, '(BODY.PEEK[])');
+      _log('FETCH_SEQ', 'Got ${fetchResult.messages.length}');
+
+      final toMarkRead = <int>[];
+      for (final msg in fetchResult.messages) {
+        final entry = _extractOtp(msg);
+        if (entry != null && !_otpController.isClosed) {
+          _log('FETCH_SEQ', 'OTP ${entry.code} → ${entry.recipient}');
+          _otpController.add(entry);
+          if (msg.sequenceId != null) toMarkRead.add(msg.sequenceId!);
+        }
+      }
+      if (toMarkRead.isNotEmpty) {
+        try {
+          await _client!.store(
+            MessageSequence.fromIds(toMarkRead),
+            [r'\Seen'],
+            action: StoreAction.add,
+          );
+        } catch (_) {}
+      }
+    } catch (e) {
+      _log('FETCH_SEQ', 'Error: $e');
+      await _closeClient();
+    } finally {
+      _polling = false;
+    }
+  }
+
   // ── IMAP IDLE (server push) ───────────────────────────────────────────────
   //
   // Uses a dedicated second connection that stays in IMAP IDLE mode.
   // The server pushes an ImapMessagesExistEvent the moment new mail arrives.
-  // We exit IDLE, call _poll() on the operations client, then re-enter IDLE.
+  // We exit IDLE, call _fetchBySeq() directly — no SEARCH round-trip needed.
   // This gives sub-second detection latency from the server side.
 
   void _startIdleLoop() {
@@ -249,12 +291,17 @@ class ImapService {
 
         final signal = Completer<bool>(); // true = new mail, false = keepalive/lost
 
+        int pushedOldExists = 0;
+        int pushedNewExists = 0;
+
         // Server fires this when "* N EXISTS" arrives during IDLE
         existsSub = _idleClient!.eventBus
             .on<ImapMessagesExistEvent>()
             .listen((event) {
-          _log('IDLE', '⚡ Push: ${event.newMessagesExists} messages '
+          _log('IDLE', '⚡ Push: ${event.newMessagesExists} msgs '
               '(was ${event.oldMessagesExists})');
+          pushedOldExists = event.oldMessagesExists;
+          pushedNewExists = event.newMessagesExists;
           if (!signal.isCompleted) signal.complete(true);
         });
 
@@ -295,9 +342,10 @@ class ImapService {
           continue;
         }
 
-        // New mail confirmed — trigger fetch on operations client immediately
-        _log('IDLE', 'Triggering poll...');
-        _poll(); // unawaited — runs concurrently
+        // New mail confirmed — fetch ONLY the new messages by sequence ID.
+        // No SEARCH round-trip: pushedOldExists+1 → pushedNewExists is exact.
+        _log('IDLE', 'Fetching seq ${pushedOldExists + 1}:$pushedNewExists');
+        _fetchBySeq(pushedOldExists + 1, pushedNewExists); // unawaited
 
       } catch (e) {
         existsSub?.cancel();

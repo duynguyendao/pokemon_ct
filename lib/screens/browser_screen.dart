@@ -8,6 +8,15 @@ import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
 import '../utils/device_profiles.dart';
 
+// Clears all cookies, cache, and localStorage so each account starts isolated
+Future<void> _clearBrowserData(WebViewController ctrl) async {
+  try {
+    await WebViewCookieManager().clearCookies();
+    await ctrl.clearCache();
+    await ctrl.clearLocalStorage();
+  } catch (_) {}
+}
+
 class BrowserScreen extends StatefulWidget {
   final Account account;
   final Proxy? proxy;
@@ -165,6 +174,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(NavigationDelegate(
+
         onPageStarted: (url) {
           // Nếu đang ở trang OTP và URL thay đổi → clear status "Đang xác nhận"
           final wasOnOtpPage = _lastOtpPageUrl != null && _currentUrl == _lastOtpPageUrl;
@@ -215,10 +225,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
       ..addJavaScriptChannel(
         'FlutterChannel',
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
-      )
-      ..loadRequest(Uri.parse(startUrl));
+      );
 
     setState(() => _currentUrl = startUrl);
+
+    // Clear cookies/cache/localStorage first — isolate each account's session
+    _clearBrowserData(_controller).then((_) {
+      if (mounted) _controller.loadRequest(Uri.parse(startUrl));
+    });
   }
 
   void _handleJsMessage(String message) {
@@ -466,39 +480,51 @@ class _BrowserScreenState extends State<BrowserScreen> {
           ],
         ),
         actions: [
-          if (widget.isRunningAll) ...[
-            if (widget.onSkipCurrent != null)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.warning,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    minimumSize: Size.zero,
-                  ),
-                  onPressed: widget.onSkipCurrent,
-                  icon: const Icon(Icons.skip_next, size: 16),
-                  label: const Text('Skip', style: TextStyle(fontSize: 11)),
-                ),
-              ),
-            if (widget.onStopAll != null)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.error,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    minimumSize: Size.zero,
-                  ),
-                  onPressed: widget.onStopAll,
-                  icon: const Icon(Icons.stop, size: 16),
-                  label: const Text('Stop All', style: TextStyle(fontSize: 11)),
-                ),
-              ),
-          ] else if (widget.proxy != null)
+          if (widget.proxy != null)
             IconButton(
               icon: const Icon(Icons.vpn_lock, color: AppColors.done, size: 20),
               onPressed: _showProxyInfo,
+            ),
+          if (widget.isRunningAll) ...[
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.warning,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                ),
+                onPressed: widget.onSkipCurrent,
+                icon: const Icon(Icons.skip_next, size: 16),
+                label: const Text('Skip', style: TextStyle(fontSize: 11)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                ),
+                onPressed: widget.onStopAll,
+                icon: const Icon(Icons.stop, size: 16),
+                label: const Text('Stop All', style: TextStyle(fontSize: 11)),
+              ),
+            ),
+          ] else
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                ),
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.stop, size: 16),
+                label: const Text('Stop', style: TextStyle(fontSize: 11)),
+              ),
             ),
         ],
       ),
