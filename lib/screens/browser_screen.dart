@@ -345,10 +345,20 @@ class _BrowserScreenState extends State<BrowserScreen> {
     required Duration timeout,
     String? excludeCode,
   }) async {
+    final provider = context.read<AppProvider>();
+    if (!provider.imapRunning) {
+      _setStatus('Dang khoi dong OTP server...');
+      final ready = await provider.ensureOtpServerRunning();
+      if (!mounted) return null;
+      if (!ready) {
+        _setStatus('OTP server khong chay. Kiem tra IMAP trong OTP Monitor.');
+        return null;
+      }
+    }
+
     final existing = _getOtpForAccount();
     if (existing != null && existing != excludeCode) return existing;
 
-    final provider = context.read<AppProvider>();
     final completer = Completer<String?>();
     StreamSubscription<OtpEntry>? sub;
     Timer? timeoutTimer;
@@ -366,10 +376,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
     void checkCachedOtp() {
       final latest = _getOtpForAccount();
       if (latest != null && latest != excludeCode) finish(latest);
-    }
-
-    if (!provider.imapRunning && !provider.imapStarting) {
-      _setStatus('OTP server chua chay. Bam Bat dau o OTP Monitor.');
     }
 
     sub = provider.otpStream.listen((otp) {

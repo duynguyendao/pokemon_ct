@@ -30,6 +30,7 @@ class AppProvider extends ChangeNotifier {
   bool _imapStopping = false;
   String? _imapError;
   bool _loaded = false;
+  Future<void>? _imapStartFuture;
 
   StreamSubscription<OtpEntry>? _otpSub;
 
@@ -49,7 +50,7 @@ class AppProvider extends ChangeNotifier {
   String get defaultPassword => _defaultPassword;
   bool get proxyEnabled => _proxyEnabled;
   bool get fakeBrowser => _fakeBrowser;
-  bool get imapRunning => _imapRunning;
+  bool get imapRunning => _imapRunning && _imap.isRunning;
   bool get imapStarting => _imapStarting;
   bool get imapStopping => _imapStopping;
   String? get imapError => _imapError;
@@ -295,6 +296,28 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> startImap() async {
+    if (_imap.isRunning) {
+      if (!_imapRunning) {
+        _imapRunning = true;
+        notifyListeners();
+      }
+      return;
+    }
+
+    final inFlight = _imapStartFuture;
+    if (inFlight != null) return inFlight;
+
+    final future = _startImapImpl();
+    _imapStartFuture = future;
+    future.whenComplete(() {
+      if (identical(_imapStartFuture, future)) {
+        _imapStartFuture = null;
+      }
+    });
+    return future;
+  }
+
+  Future<void> _startImapImpl() async {
     final config = _buildImapConfig();
     if (config == null) return;
     _imapError = null;
@@ -310,6 +333,19 @@ class AppProvider extends ChangeNotifier {
       _imapStarting = false;
       notifyListeners();
     }
+  }
+
+  Future<bool> ensureOtpServerRunning() async {
+    if (_imap.isRunning) {
+      if (!_imapRunning) {
+        _imapRunning = true;
+        notifyListeners();
+      }
+      return true;
+    }
+
+    await startImap();
+    return _imap.isRunning;
   }
 
   Future<void> stopImap() async {

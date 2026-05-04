@@ -99,6 +99,7 @@ class ImapService {
       Duration(seconds: config.pollIntervalSeconds),
       (_) => _pollNew(),
     );
+    unawaited(_pollNew());
   }
 
   Future<void> stop() async {
