@@ -43,12 +43,19 @@ class EmailSearchResult {
 }
 
 class ImapService {
+  // ── Operations client (fetch / search / mark-read) ─────────────────────────
   ImapClient? _client;
-  Timer? _pollTimer;
+  bool _polling = false;
+
+  // ── IDLE client (dedicated push listener) ──────────────────────────────────
+  ImapClient? _idleClient;
+  bool _idleRunning = false;
+
+  // ── Shared ────────────────────────────────────────────────────────────────
+  Timer? _pollTimer;        // fallback poll as safety net
   ImapConfig? _config;
   List<FilterRule> _rules = [];
   bool _isRunning = false;
-  bool _polling = false;
 
   final _otpController = StreamController<OtpEntry>.broadcast();
   Stream<OtpEntry> get otpStream => _otpController.stream;
@@ -58,11 +65,19 @@ class ImapService {
     _rules = rules.where((r) => r.enabled).toList();
   }
 
+  // ── Start / Stop ──────────────────────────────────────────────────────────
+
   Future<void> start(ImapConfig config) async {
     await stop();
     _config = config;
     _isRunning = true;
+
     await _connect();
+
+    // IDLE loop runs in background — provides near-instant push notification
+    _startIdleLoop();
+
+    // Fallback poll (30s) in case IDLE gaps or server doesn't support IDLE
     _pollTimer = Timer.periodic(
       Duration(seconds: config.pollIntervalSeconds),
       (_) => _poll(),
@@ -71,35 +86,34 @@ class ImapService {
 
   Future<void> stop() async {
     _isRunning = false;
+    _idleRunning = false;
     _pollTimer?.cancel();
     _pollTimer = null;
+    await _closeIdleClient();
     await _closeClient();
   }
+
+  // ── Operations client ─────────────────────────────────────────────────────
 
   Future<void> _closeClient() async {
     final old = _client;
     _client = null;
     if (old != null) {
-      try {
-        await old.logout();
-        _log('CONNECT', 'Disconnected ✓');
-      } catch (_) {}
+      try { await old.logout(); } catch (_) {}
     }
   }
 
   Future<void> _connect() async {
     final config = _config!;
     await _closeClient();
-    _log('CONNECT', 'Connecting to ${config.host}:${config.port}...');
+    _log('CONNECT', 'Connecting ${config.host}:${config.port}...');
     final client = ImapClient(isLogEnabled: false);
     try {
       await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
-      _log('CONNECT', 'Connected ✓');
       await client.login(config.username, config.password);
-      _log('CONNECT', 'Logged in ✓');
       await client.selectMailboxByPath('INBOX');
-      _log('CONNECT', 'Inbox selected ✓');
       _client = client;
+      _log('CONNECT', 'Ready ✓');
     } catch (e) {
       _log('CONNECT', 'Error: $e');
       try { await client.logout(); } catch (_) {}
@@ -109,17 +123,12 @@ class ImapService {
 
   Future<List<OtpEntry>> fetchNow() async {
     if (_config == null) return [];
-    _log('FETCH', 'Fetching...');
+    _log('FETCH', 'Manual fetch...');
     try {
-      // Reuse existing connection if alive (much faster)
-      if (_client == null) {
-        _log('FETCH', 'No connection, connecting...');
-        await _connect();
-      }
+      if (_client == null) await _connect();
       return await _poll();
     } catch (e) {
-      // Connection dead — reconnect once and retry
-      _log('FETCH', 'Connection error ($e), reconnecting...');
+      _log('FETCH', 'Dead connection ($e), reconnecting...');
       try {
         await _closeClient();
         await _connect();
@@ -133,10 +142,7 @@ class ImapService {
   }
 
   Future<List<OtpEntry>> _poll() async {
-    if (_polling) {
-      _log('POLL', 'Skipped (busy)');
-      return [];
-    }
+    if (_polling) { _log('POLL', 'Skipped (busy)'); return []; }
     _polling = true;
     final results = <OtpEntry>[];
     try {
@@ -144,18 +150,13 @@ class ImapService {
 
       final mailbox = await _client!.selectMailboxByPath('INBOX');
       final count = mailbox.messagesExists;
-      _log('POLL', 'Messages: $count');
+      _log('POLL', 'Inbox: $count messages');
       if (count == 0) return results;
 
-      // Search for recent emails using server-side date filter
       final since = DateTime.now().subtract(const Duration(hours: 1));
-      final searchBuilder = SearchQueryBuilder.from(
-        '',
-        SearchQueryType.allTextHeaders,
-        since: since,
-      );
-      final criteria = searchBuilder.toString();
-      _log('POLL', 'Searching: $criteria');
+      final criteria = SearchQueryBuilder.from(
+        '', SearchQueryType.allTextHeaders, since: since,
+      ).toString();
 
       final searchResult = await _client!.searchMessages(
         searchCriteria: criteria.isEmpty ? 'ALL' : criteria,
@@ -167,25 +168,25 @@ class ImapService {
       }
 
       final ids = seq.toList();
-      // Limit to last 20 to avoid heavy fetch
       final limited = ids.length > 20 ? ids.sublist(ids.length - 20) : ids;
-      _log('POLL', 'Fetching ${limited.length} recent messages...');
+      _log('POLL', 'Fetching ${limited.length} messages...');
 
-      final batch = MessageSequence.fromIds(limited);
-      final fetchResult = await _client!.fetchMessages(batch, '(BODY.PEEK[])');
-      _log('POLL', 'Got ${fetchResult.messages.length} messages');
+      final fetchResult = await _client!.fetchMessages(
+        MessageSequence.fromIds(limited),
+        '(BODY.PEEK[])',
+      );
+      _log('POLL', 'Got ${fetchResult.messages.length}');
 
       final toMarkRead = <int>[];
       for (final msg in fetchResult.messages) {
         final entry = _extractOtp(msg);
         if (entry != null && !_otpController.isClosed) {
           results.add(entry);
-          _log('POLL', 'OTP: ${entry.code} → ${entry.recipient}');
+          _log('POLL', 'OTP ${entry.code} → ${entry.recipient}');
           _otpController.add(entry);
           if (msg.sequenceId != null) toMarkRead.add(msg.sequenceId!);
         }
       }
-      // Đánh dấu đã đọc
       if (toMarkRead.isNotEmpty) {
         try {
           await _client!.store(
@@ -193,10 +194,7 @@ class ImapService {
             [r'\Seen'],
             action: StoreAction.add,
           );
-          _log('POLL', 'Marked ${toMarkRead.length} as read');
-        } catch (e) {
-          _log('POLL', 'Mark read error: $e');
-        }
+        } catch (_) {}
       }
     } catch (e) {
       _log('POLL', 'Error: $e');
@@ -207,7 +205,119 @@ class ImapService {
     return results;
   }
 
-  /// Tìm email theo keyword trong subject/body + khoảng thời gian
+  // ── IMAP IDLE (server push) ───────────────────────────────────────────────
+  //
+  // Uses a dedicated second connection that stays in IMAP IDLE mode.
+  // The server pushes an ImapMessagesExistEvent the moment new mail arrives.
+  // We exit IDLE, call _poll() on the operations client, then re-enter IDLE.
+  // This gives sub-second detection latency from the server side.
+
+  void _startIdleLoop() {
+    _idleRunning = true;
+    _runIdleLoop(); // intentionally unawaited — runs in background
+  }
+
+  Future<void> _closeIdleClient() async {
+    final old = _idleClient;
+    _idleClient = null;
+    if (old != null) {
+      try { await old.idleDone(); } catch (_) {}
+      try { await old.logout(); } catch (_) {}
+    }
+  }
+
+  Future<void> _connectIdleClient() async {
+    final config = _config!;
+    await _closeIdleClient();
+    _log('IDLE', 'Connecting idle client...');
+    final client = ImapClient(isLogEnabled: false);
+    await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
+    await client.login(config.username, config.password);
+    await client.selectMailboxByPath('INBOX');
+    _idleClient = client;
+    _log('IDLE', 'Idle client ready ✓');
+  }
+
+  Future<void> _runIdleLoop() async {
+    while (_isRunning && _idleRunning) {
+      StreamSubscription<ImapMessagesExistEvent>? existsSub;
+      StreamSubscription<ImapConnectionLostEvent>? lostSub;
+      Timer? keepaliveTimer;
+
+      try {
+        if (_idleClient == null) await _connectIdleClient();
+
+        final signal = Completer<bool>(); // true = new mail, false = keepalive/lost
+
+        // Server fires this when "* N EXISTS" arrives during IDLE
+        existsSub = _idleClient!.eventBus
+            .on<ImapMessagesExistEvent>()
+            .listen((event) {
+          _log('IDLE', '⚡ Push: ${event.newMessagesExists} messages '
+              '(was ${event.oldMessagesExists})');
+          if (!signal.isCompleted) signal.complete(true);
+        });
+
+        // Reconnect if server drops the IDLE connection
+        lostSub = _idleClient!.eventBus
+            .on<ImapConnectionLostEvent>()
+            .listen((_) {
+          _log('IDLE', 'Connection lost');
+          if (!signal.isCompleted) signal.complete(false);
+        });
+
+        // IMAP servers terminate IDLE after 30 min — we restart every 25 min
+        keepaliveTimer = Timer(const Duration(minutes: 25), () {
+          if (!signal.isCompleted) signal.complete(false);
+        });
+
+        _log('IDLE', 'Entering IDLE...');
+        final idleFuture = _idleClient!.idleStart();
+
+        // Await signal: either new mail push, connection lost, or keepalive
+        final hasNewMail = await signal.future;
+
+        existsSub.cancel();
+        lostSub.cancel();
+        keepaliveTimer.cancel();
+
+        // Exit IDLE
+        try { await _idleClient!.idleDone(); } catch (_) {}
+        try { await idleFuture.timeout(const Duration(seconds: 5)); } catch (_) {}
+
+        if (!hasNewMail) {
+          // Connection lost — force reconnect on next iteration
+          if (_idleClient != null) {
+            try { await _idleClient!.logout(); } catch (_) {}
+            _idleClient = null;
+          }
+          if (_isRunning) await Future.delayed(const Duration(seconds: 2));
+          continue;
+        }
+
+        // New mail confirmed — trigger fetch on operations client immediately
+        _log('IDLE', 'Triggering poll...');
+        _poll(); // unawaited — runs concurrently
+
+      } catch (e) {
+        existsSub?.cancel();
+        lostSub?.cancel();
+        keepaliveTimer?.cancel();
+        _log('IDLE', 'Error: $e — reconnecting in 5s...');
+        final old = _idleClient;
+        _idleClient = null;
+        if (old != null) {
+          try { await old.idleDone(); } catch (_) {}
+          try { await old.logout(); } catch (_) {}
+        }
+        if (_isRunning) await Future.delayed(const Duration(seconds: 5));
+      }
+    }
+    _log('IDLE', 'Loop stopped');
+  }
+
+  // ── Email Search (own temporary connection) ───────────────────────────────
+
   Future<List<EmailSearchResult>> searchEmails({
     required ImapConfig config,
     String subjectKeyword = '',
@@ -218,79 +328,58 @@ class ImapService {
   }) async {
     final results = <EmailSearchResult>[];
 
-    // Pause poll timer to free connection slot
     final wasRunning = _isRunning;
     _pollTimer?.cancel();
     _pollTimer = null;
-    _log('SEARCH', 'Paused poll, closing existing connection...');
     await _closeClient();
 
-    _log('SEARCH', 'Connecting...');
     final client = ImapClient(isLogEnabled: false);
     try {
       await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
-      _log('SEARCH', 'Connected ✓');
       await client.login(config.username, config.password);
-      _log('SEARCH', 'Logged in ✓');
       await client.selectMailboxByPath('INBOX');
-      _log('SEARCH', 'Inbox selected ✓');
+      _log('SEARCH', 'Connected ✓');
 
-      // Build server-side search criteria (date range + keyword)
-      final searchBuilder = SearchQueryBuilder.from(
-        subjectKeyword,
-        SearchQueryType.allTextHeaders,
+      final criteria = SearchQueryBuilder.from(
+        subjectKeyword, SearchQueryType.allTextHeaders,
         since: from,
         before: to?.add(const Duration(days: 1)),
-      );
-      final criteria = searchBuilder.toString();
-      _log('SEARCH', 'Criteria: ${criteria.isEmpty ? "ALL" : criteria}');
+      ).toString();
 
       final searchResult = await client.searchMessages(
         searchCriteria: criteria.isEmpty ? 'ALL' : criteria,
       );
       final seq = searchResult.matchingSequence;
       if (seq == null || seq.isEmpty) {
-        _log('SEARCH', 'No matches on server');
+        _log('SEARCH', 'No matches');
         return results;
       }
 
-      _log('SEARCH', 'Server matched ${seq.length} emails');
-
-      // Limit to maxMessages, take latest
       final ids = seq.toList();
-      final limited = ids.length > maxMessages
-          ? ids.sublist(ids.length - maxMessages)
-          : ids;
+      final limited = ids.length > maxMessages ? ids.sublist(ids.length - maxMessages) : ids;
+      _log('SEARCH', 'Fetching ${limited.length} messages...');
 
-      // Batch fetch (25 per batch)
       const batchSize = 25;
       final fromDate = from ?? DateTime.now().subtract(const Duration(hours: 24));
       final toDate = to ?? DateTime.now();
 
       for (var i = 0; i < limited.length; i += batchSize) {
         final end = (i + batchSize < limited.length) ? i + batchSize : limited.length;
-        final batchIds = MessageSequence.fromIds(limited.sublist(i, end));
-        _log('SEARCH', 'Batch ${i ~/ batchSize + 1}: fetching ${end - i} messages...');
-
-        final fetchResult = await client.fetchMessages(batchIds, '(BODY.PEEK[])');
-        _log('SEARCH', 'Got ${fetchResult.messages.length}');
-
+        final fetchResult = await client.fetchMessages(
+          MessageSequence.fromIds(limited.sublist(i, end)),
+          '(BODY.PEEK[])',
+        );
         for (final msg in fetchResult.messages.reversed) {
           final msgDate = msg.decodeDate() ?? DateTime.now();
           if (msgDate.isBefore(fromDate) || msgDate.isAfter(toDate)) continue;
-
           final subject = msg.decodeSubject() ?? '';
           final sender = msg.from?.firstOrNull?.email ?? '';
           final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
-
-          // Lọc theo body keyword nếu có
-          if (bodyKeyword.isNotEmpty) {
-            if (!body.toLowerCase().contains(bodyKeyword.toLowerCase()) &&
-                !subject.toLowerCase().contains(bodyKeyword.toLowerCase())) {
-              continue;
-            }
+          if (bodyKeyword.isNotEmpty &&
+              !body.toLowerCase().contains(bodyKeyword.toLowerCase()) &&
+              !subject.toLowerCase().contains(bodyKeyword.toLowerCase())) {
+            continue;
           }
-
           final otp = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
           results.add(EmailSearchResult(
             subject: subject.isEmpty ? '(no subject)' : subject,
@@ -301,19 +390,13 @@ class ImapService {
           ));
         }
       }
-      _log('SEARCH', '✓ Found ${results.length} matching emails');
+      _log('SEARCH', '✓ ${results.length} emails');
     } catch (e) {
       _log('SEARCH', 'ERROR: $e');
       rethrow;
     } finally {
-      try {
-        await client.logout();
-        _log('SEARCH', 'Logged out ✓');
-      } catch (_) {}
-
-      // Resume poll timer
+      try { await client.logout(); } catch (_) {}
       if (wasRunning && _config != null) {
-        _log('SEARCH', 'Resuming poll timer...');
         _pollTimer = Timer.periodic(
           Duration(seconds: _config!.pollIntervalSeconds),
           (_) => _poll(),
@@ -322,6 +405,8 @@ class ImapService {
     }
     return results;
   }
+
+  // ── OTP Extraction ────────────────────────────────────────────────────────
 
   String? _extractOtpFromText(String text) {
     final patterns = [
@@ -338,7 +423,6 @@ class ImapService {
     return null;
   }
 
-  /// Lấy địa chỉ email thuần từ chuỗi "Name <email>" hoặc "Hide My Email <email>"
   String _parseEmail(String raw) {
     final match = RegExp(r'<([^>]+@[^>]+)>').firstMatch(raw);
     return (match?.group(1) ?? raw).trim().toLowerCase();
@@ -348,8 +432,6 @@ class ImapService {
     final sender = msg.from?.firstOrNull?.email ?? '';
     final subject = msg.decodeSubject() ?? '';
     final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
-
-    // Lấy email người nhận (xử lý cả "Hide My Email <real@email.com>")
     final toRaw = msg.to?.firstOrNull?.toString() ?? '';
     final recipient = _parseEmail(toRaw);
 
@@ -383,7 +465,6 @@ class ImapService {
       }
     }
 
-    // Chỉ dùng fallback khi chưa có rule nào
     if (_rules.isEmpty) {
       final fallback = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
       if (fallback != null) {
@@ -399,14 +480,14 @@ class ImapService {
     return null;
   }
 
+  // ── Misc ──────────────────────────────────────────────────────────────────
+
   Future<bool> testConnection(ImapConfig config) async {
     _log('TEST', 'Testing ${config.host}:${config.port}...');
     final client = ImapClient(isLogEnabled: false);
     try {
       await client.connectToServer(config.host, config.port, isSecure: config.isSecure);
-      _log('TEST', 'Connected ✓');
       await client.login(config.username, config.password);
-      _log('TEST', 'Logged in ✓');
       await client.logout();
       _log('TEST', 'OK ✓');
       return true;

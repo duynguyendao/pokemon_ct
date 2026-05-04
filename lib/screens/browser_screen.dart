@@ -305,8 +305,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
           await _doSubmitOtp(newOtp);
           return;
         }
-        // Trigger fresh fetch every 10s
-        if (i % 10 == 9 && mounted) {
+        // Backup fetch every 30s (IDLE handles real-time push)
+        if (i % 30 == 29 && mounted) {
           context.read<AppProvider>().fetchOtpNow();
         }
         if (mounted && i % 5 == 4) {
@@ -351,8 +351,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
         await _doSubmitOtp(newOtp);
         return;
       }
-      // Trigger fresh fetch every 10s
-      if (i % 10 == 9 && mounted) {
+      // Backup fetch every 30s (IDLE handles real-time push)
+      if (i % 30 == 29 && mounted) {
         context.read<AppProvider>().fetchOtpNow();
       }
     }
