@@ -43,8 +43,9 @@ class EmailSearchResult {
 }
 
 class ImapService {
-  static const _connectTimeout = Duration(seconds: 10);
-  static const _commandTimeout = Duration(seconds: 8);
+  static const _connectTimeout = Duration(seconds: 15);
+  static const _commandTimeout = Duration(seconds: 20);
+  static const _quickCommandTimeout = Duration(seconds: 6);
 
   // ── Operations client (fetch / search / mark-read) ─────────────────────────
   ImapClient? _client;
@@ -79,7 +80,14 @@ class ImapService {
     _config = config;
     _isRunning = true;
 
-    await _connect();
+    try {
+      await _connect();
+    } catch (_) {
+      _isRunning = false;
+      await _closeIdleClient();
+      await _closeClient();
+      rethrow;
+    }
     _startIdleLoop(); // push: fires _pollNew() the moment mail arrives
     unawaited(_pollNew()); // catches messages that arrive while IDLE starts
 
@@ -173,15 +181,26 @@ class ImapService {
       return;
     }
 
-    try {
-      final result = await _client!.uidSearchMessages(searchCriteria: 'ALL');
-      final uids = result.matchingSequence?.toList() ?? [];
-      _lastSeenUid = uids.isNotEmpty ? uids.last : 0;
-      _log('CONNECT', 'Last UID: $_lastSeenUid');
-    } catch (e) {
-      _log('CONNECT', 'UID init error: $e — will use SINCE fallback');
-      _lastSeenUid = 0;
+    if (mailbox.messagesExists > 0) {
+      try {
+        final fetchResult = await _client!.fetchMessages(
+          MessageSequence.fromLast(),
+          '(UID)',
+          responseTimeout: _quickCommandTimeout,
+        );
+        final uid = fetchResult.messages.firstOrNull?.uid;
+        if (uid != null && uid > 0) {
+          _lastSeenUid = uid;
+          _log('CONNECT', 'Last UID from last message: $_lastSeenUid');
+          return;
+        }
+      } catch (e) {
+        _log('CONNECT', 'Last-message UID init skipped: $e');
+      }
     }
+
+    _lastSeenUid = 0;
+    _log('CONNECT', 'Last UID unknown — using fast SINCE fallback');
   }
 
   // ── Core fetch: only new UIDs (like PC server's "UID lastUid+1:*") ─────────
@@ -655,6 +674,7 @@ class ImapService {
       await client
           .login(config.username, config.password)
           .timeout(_commandTimeout);
+      await client.selectMailboxByPath('INBOX').timeout(_commandTimeout);
       await client.logout();
       _log('TEST', 'OK ✓');
       return true;
