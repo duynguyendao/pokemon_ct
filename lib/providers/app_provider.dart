@@ -6,7 +6,6 @@ import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
 import '../services/storage_service.dart';
 import '../services/imap_service.dart';
-import '../services/background_service.dart';
 export '../services/imap_service.dart' show EmailSearchResult;
 
 class AppProvider extends ChangeNotifier {
@@ -34,7 +33,6 @@ class AppProvider extends ChangeNotifier {
   Future<void>? _imapStartFuture;
 
   StreamSubscription<OtpEntry>? _otpSub;
-  Timer? _bgOtpPollingTimer;
 
   // Getters
   List<Account> get accounts => _accounts;
@@ -90,30 +88,9 @@ class AppProvider extends ChangeNotifier {
     _setupOtpStream();
     notifyListeners();
 
-    // Initialize background IMAP service
-    await _initializeBackgroundService();
-
-    // Auto-start IMAP if credentials are saved
+    // Auto-start IMAP polling when app loads if credentials are saved
     if (_imapConfig['password']?.isNotEmpty == true) {
       unawaited(startImap());
-    }
-  }
-
-  Future<void> _initializeBackgroundService() async {
-    final bgService = BackgroundServiceManager();
-    try {
-      await bgService.initializeBackground();
-
-      if (_imapConfig['password']?.isNotEmpty == true) {
-        await bgService.saveImapConfig(
-          host: _imapConfig['host'] ?? '',
-          port: int.tryParse(_imapConfig['port'] ?? '') ?? 993,
-          username: _imapConfig['username'] ?? '',
-          password: _imapConfig['password'] ?? '',
-        );
-      }
-    } catch (e) {
-      // Silently fail - background service is optional
     }
   }
 
@@ -126,27 +103,6 @@ class AppProvider extends ChangeNotifier {
         if (_otpHistory.length > 50) _otpHistory.removeLast();
       }
       notifyListeners();
-    });
-
-    // Poll OTP from background service
-    _bgOtpPollingTimer?.cancel();
-    _bgOtpPollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      final bgService = BackgroundServiceManager();
-      final bgStatus = await bgService.getBackgroundStatus();
-      if (bgStatus != null) {
-        final otp = OtpEntry(
-          code: bgStatus['code'],
-          recipient: bgStatus['recipient'],
-          timestamp: bgStatus['timestamp'] ?? DateTime.now(),
-        );
-        if (!_isDuplicateOtp(otp)) {
-          _cacheOtp(otp);
-          _otpHistory.insert(0, otp);
-          if (_otpHistory.length > 50) _otpHistory.removeLast();
-          notifyListeners();
-        }
-        await bgService.clearBackgroundOtp();
-      }
     });
   }
 
@@ -335,18 +291,6 @@ class AppProvider extends ChangeNotifier {
   Future<void> saveImapConfig(Map<String, String> config) async {
     _imapConfig = config;
     await _storage.saveImapConfig(config);
-
-    // Also save to background service
-    if (config['password']?.isNotEmpty == true) {
-      final bgService = BackgroundServiceManager();
-      await bgService.saveImapConfig(
-        host: config['host'] ?? '',
-        port: int.tryParse(config['port'] ?? '') ?? 993,
-        username: config['username'] ?? '',
-        password: config['password'] ?? '',
-      );
-    }
-
     notifyListeners();
   }
 
@@ -476,7 +420,7 @@ class AppProvider extends ChangeNotifier {
       username: user,
       password: pass,
       isSecure: (int.tryParse(portStr ?? '') ?? 993) == 993,
-      pollIntervalSeconds: 1,
+      pollIntervalSeconds: 3,
     );
   }
 
@@ -551,7 +495,6 @@ class AppProvider extends ChangeNotifier {
   @override
   void dispose() {
     _otpSub?.cancel();
-    _bgOtpPollingTimer?.cancel();
     _imap.dispose();
     super.dispose();
   }
