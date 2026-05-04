@@ -109,10 +109,15 @@ class ImapService {
 
   Future<List<OtpEntry>> fetchNow() async {
     if (_config == null) return [];
+    // Always reconnect fresh để tránh stale/dead connections
+    _log('FETCH', 'Forcing fresh reconnect...');
     try {
-      if (_client == null) await _connect();
+      await _closeClient();
+      await _connect();
       return await _poll();
-    } catch (_) {
+    } catch (e) {
+      _log('FETCH', 'Error: $e');
+      await _closeClient();
       return [];
     }
   }

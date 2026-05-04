@@ -446,9 +446,15 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () => _toggleImap(p),
-                    icon: Icon(p.imapRunning ? Icons.stop : Icons.play_arrow, size: 16),
-                    label: Text(p.imapRunning ? 'Dừng' : 'Bắt đầu'),
+                    onPressed: (p.imapStarting || p.imapStopping) ? null : () => _toggleImap(p),
+                    icon: (p.imapStarting || p.imapStopping)
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : Icon(p.imapRunning ? Icons.stop : Icons.play_arrow, size: 16),
+                    label: Text(
+                      p.imapStarting ? 'Đang kết nối...'
+                          : p.imapStopping ? 'Đang dừng...'
+                          : p.imapRunning ? 'Dừng' : 'Bắt đầu',
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: p.imapRunning ? AppColors.error : AppColors.done,
                     ),

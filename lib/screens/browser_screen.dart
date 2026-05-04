@@ -101,10 +101,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(NavigationDelegate(
         onPageStarted: (url) {
+          // Nếu đang ở trang OTP và URL thay đổi → clear status "Đang xác nhận"
+          final wasOnOtpPage = _lastOtpPageUrl != null && _currentUrl == _lastOtpPageUrl;
           setState(() {
             _currentUrl = url;
             _loading = true;
+            if (wasOnOtpPage && url != _lastOtpPageUrl) {
+              _statusText = '✅ OTP xác nhận thành công!';
+              _otpAutoSubmitting = false;
+              _lastOtpPageUrl = null;
+            }
           });
+          if (wasOnOtpPage) {
+            Future.delayed(const Duration(seconds: 2), () {
+              if (mounted && _statusText.contains('thành công')) {
+                setState(() => _statusText = '');
+              }
+            });
+          }
           if (p.fakeBrowser) {
             _controller.runJavaScript(buildAntiFingerprintScript(_profile));
           }
@@ -171,12 +185,26 @@ class _BrowserScreenState extends State<BrowserScreen> {
         setState(() => _statusText = '⌨️ Đã điền OTP...');
       } else if (message.contains('"status":"submitted"')) {
         setState(() { _statusText = '⏳ Đang xác nhận...'; });
-        // Sau 3s kiểm tra lại xem có lỗi không
+        // Sau 3s kiểm tra lại xem có lỗi không hoặc đã chuyển trang
         Future.delayed(const Duration(seconds: 3), () {
-          if (mounted && _currentUrl == _lastOtpPageUrl) {
+          if (!mounted) return;
+          if (_currentUrl == _lastOtpPageUrl) {
+            // Vẫn ở trang OTP → check lỗi
             _controller.runJavaScript(_detectOtpFieldJs);
+            setState(() => _otpAutoSubmitting = false);
+          } else {
+            // Đã chuyển trang → OTP success!
+            setState(() {
+              _statusText = '✅ OTP xác nhận thành công!';
+              _otpAutoSubmitting = false;
+              _lastOtpPageUrl = null;
+            });
+            Future.delayed(const Duration(seconds: 2), () {
+              if (mounted && _statusText.contains('thành công')) {
+                setState(() => _statusText = '');
+              }
+            });
           }
-          if (mounted) setState(() { _otpAutoSubmitting = false; });
         });
       } else if (message.contains('"status":"noField"')) {
         setState(() { _statusText = ''; _otpAutoSubmitting = false; });
@@ -200,8 +228,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final otp = _getOtpForAccount();
 
     if (otp == null) {
-      setState(() => _statusText = '⏳ Chờ OTP cho ${widget.account.email}...');
-      for (int i = 0; i < 30; i++) {
+      setState(() => _statusText = '⏳ Chờ OTP cho ${widget.account.email}... (max 90s)');
+      for (int i = 0; i < 90; i++) {
         await Future.delayed(const Duration(seconds: 1));
         if (!mounted) return;
         final newOtp = _getOtpForAccount();
@@ -209,8 +237,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
           await _doSubmitOtp(newOtp);
           return;
         }
+        // Trigger fresh fetch every 10s
+        if (i % 10 == 9 && mounted) {
+          context.read<AppProvider>().fetchOtpNow();
+        }
+        if (mounted && i % 5 == 4) {
+          setState(() => _statusText = '⏳ Chờ OTP... ${i + 1}s/90s');
+        }
       }
-      if (mounted) setState(() { _statusText = '❌ Không nhận OTP sau 30s'; _otpAutoSubmitting = false; });
+      if (mounted) setState(() { _statusText = '❌ Không nhận OTP sau 90s'; _otpAutoSubmitting = false; });
       return;
     }
 
@@ -235,8 +270,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _otpRetryCount++;
     setState(() => _statusText = '❌ Sai OTP, chờ mã mới... (${_otpRetryCount}/$_maxOtpRetries)');
 
-    // Chờ OTP mới (khác mã vừa dùng)
-    for (int i = 0; i < 60; i++) {
+    // Chờ OTP mới (khác mã vừa dùng) - 90s max
+    for (int i = 0; i < 90; i++) {
       await Future.delayed(const Duration(seconds: 1));
       if (!mounted) return;
       final newOtp = _getOtpForAccount();
@@ -244,8 +279,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
         await _doSubmitOtp(newOtp);
         return;
       }
+      // Trigger fresh fetch every 10s
+      if (i % 10 == 9 && mounted) {
+        context.read<AppProvider>().fetchOtpNow();
+      }
     }
-    if (mounted) setState(() { _statusText = '❌ Không có OTP mới sau 60s'; _otpAutoSubmitting = false; });
+    if (mounted) setState(() { _statusText = '❌ Không có OTP mới sau 90s'; _otpAutoSubmitting = false; });
   }
 
   Future<void> _autoFill({bool silent = false}) async {

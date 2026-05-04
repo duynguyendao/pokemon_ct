@@ -24,6 +24,8 @@ class AppProvider extends ChangeNotifier {
   bool _proxyEnabled = false;
   bool _fakeBrowser = true;
   bool _imapRunning = false;
+  bool _imapStarting = false;
+  bool _imapStopping = false;
   String? _imapError;
   bool _loaded = false;
 
@@ -44,6 +46,8 @@ class AppProvider extends ChangeNotifier {
   bool get proxyEnabled => _proxyEnabled;
   bool get fakeBrowser => _fakeBrowser;
   bool get imapRunning => _imapRunning;
+  bool get imapStarting => _imapStarting;
+  bool get imapStopping => _imapStopping;
   String? get imapError => _imapError;
   bool get loaded => _loaded;
 
@@ -258,22 +262,31 @@ class AppProvider extends ChangeNotifier {
   Future<void> startImap() async {
     final config = _buildImapConfig();
     if (config == null) return;
+    _imapError = null;
+    _imapStarting = true;
+    notifyListeners();
     try {
-      _imapError = null;
       await _imap.start(config);
       _imapRunning = true;
-      notifyListeners();
     } catch (e) {
       _imapError = e.toString();
       _imapRunning = false;
+    } finally {
+      _imapStarting = false;
       notifyListeners();
     }
   }
 
   Future<void> stopImap() async {
-    await _imap.stop();
-    _imapRunning = false;
+    _imapStopping = true;
+    _imapRunning = false; // immediate UI feedback
     notifyListeners();
+    try {
+      await _imap.stop();
+    } finally {
+      _imapStopping = false;
+      notifyListeners();
+    }
   }
 
   void clearOtpHistory() {
