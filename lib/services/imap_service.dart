@@ -3,6 +3,7 @@ import 'package:enough_mail/enough_mail.dart';
 import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
 import 'debug_service.dart';
+import 'otp_extractor.dart';
 
 void _log(String tag, String msg) {
   debugService.log('[IMAP:$tag] $msg');
@@ -46,6 +47,7 @@ class ImapService {
   static const _connectTimeout = Duration(seconds: 15);
   static const _commandTimeout = Duration(seconds: 20);
   static const _quickCommandTimeout = Duration(seconds: 6);
+  static const _maxOtpMessageAge = Duration(minutes: 15);
 
   // ── Operations client (fetch / search / mark-read) ─────────────────────────
   ImapClient? _client;
@@ -282,10 +284,10 @@ class ImapService {
 
       final toMarkRead = <int>[];
       for (final msg in fetchResult.messages) {
-        // 1-minute freshness guard — skip OTPs from emails older than 60 seconds
+        // Keep startup fallback from scanning old codes, but allow normal mail lag.
         final msgDate = msg.decodeDate();
         if (msgDate != null &&
-            DateTime.now().difference(msgDate).inSeconds > 60) {
+            DateTime.now().difference(msgDate) > _maxOtpMessageAge) {
           _log(
             'POLL',
             'Skip stale email (${DateTime.now().difference(msgDate).inSeconds}s old)',
@@ -581,18 +583,7 @@ class ImapService {
   // ── OTP Extraction ────────────────────────────────────────────────────────
 
   String? _extractOtpFromText(String text) {
-    final patterns = [
-      r'【パスコード】\s*(\d{6})',
-      r'(?:パスコード|コード)[:：\s]+(\d{6})',
-      r'\b(\d{6})\b',
-    ];
-    for (final p in patterns) {
-      try {
-        final m = RegExp(p).firstMatch(text);
-        if (m != null) return m.group(1) ?? m.group(0);
-      } catch (_) {}
-    }
-    return null;
+    return extractOtpFromText(text);
   }
 
   String _parseEmail(String raw) {
@@ -640,24 +631,24 @@ class ImapService {
             sender: sender,
             subject: subject,
             recipient: recipient.isNotEmpty ? recipient : null,
-            timestamp: msg.decodeDate() ?? DateTime.now(),
+            timestamp: DateTime.now(),
           );
         }
       }
     }
 
-    if (_rules.isEmpty) {
-      final fallback =
-          _extractOtpFromText(body) ?? _extractOtpFromText(subject);
-      if (fallback != null) {
-        return OtpEntry(
-          code: fallback,
-          sender: sender,
-          subject: subject,
-          recipient: recipient.isNotEmpty ? recipient : null,
-          timestamp: msg.decodeDate() ?? DateTime.now(),
-        );
+    final fallback = _extractOtpFromText(body) ?? _extractOtpFromText(subject);
+    if (fallback != null) {
+      if (_rules.isNotEmpty) {
+        _log('POLL', 'OTP fallback matched without rule match');
       }
+      return OtpEntry(
+        code: fallback,
+        sender: sender,
+        subject: subject,
+        recipient: recipient.isNotEmpty ? recipient : null,
+        timestamp: DateTime.now(),
+      );
     }
     return null;
   }

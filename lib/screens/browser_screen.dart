@@ -313,13 +313,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   bool _matchesCurrentAccountOtp(OtpEntry otp, {String? excludeCode}) {
     final recipient = otp.recipient?.toLowerCase().trim() ?? '';
-    final target = widget.account.email.toLowerCase().trim();
-    if (recipient != target) return false;
+    final target = _normalizeEmail(widget.account.email);
+    if (recipient.isNotEmpty && _normalizeEmail(recipient) != target) {
+      return false;
+    }
     if (_loginAttemptTime != null &&
         otp.timestamp.isBefore(_loginAttemptTime!)) {
       return false;
     }
     return excludeCode == null || otp.code != excludeCode;
+  }
+
+  String _normalizeEmail(String email) {
+    final trimmed = email.toLowerCase().trim();
+    final at = trimmed.lastIndexOf('@');
+    if (at <= 0) return trimmed;
+
+    var local = trimmed.substring(0, at);
+    final domain = trimmed.substring(at + 1);
+    final plus = local.indexOf('+');
+    if (plus >= 0) local = local.substring(0, plus);
+
+    if (domain == 'gmail.com' || domain == 'googlemail.com') {
+      local = local.replaceAll('.', '');
+      return '$local@gmail.com';
+    }
+    return '$local@$domain';
   }
 
   Future<String?> _waitForOtpForAccount({

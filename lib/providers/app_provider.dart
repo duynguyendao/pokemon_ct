@@ -366,27 +366,44 @@ class AppProvider extends ChangeNotifier {
   /// Lấy OTP mới nhất dành riêng cho account email này.
   /// [after]: chỉ lấy OTP có timestamp >= after (lọc theo thời điểm bấm ログイン).
   String? latestOtpForEmail(String accountEmail, {DateTime? after}) {
-    final target = accountEmail.toLowerCase().trim();
-    for (final otp in _otpHistory) {
-      final r = otp.recipient?.toLowerCase().trim() ?? '';
-      if (r != target) continue;
-      if (after != null && otp.timestamp.isBefore(after)) continue;
-      return otp.code;
-    }
-    return null;
+    return latestOtpEntryForEmail(accountEmail, after: after)?.code;
   }
 
   /// OTP entry mới nhất cho account email.
   /// [after]: chỉ lấy OTP có timestamp >= after.
   OtpEntry? latestOtpEntryForEmail(String accountEmail, {DateTime? after}) {
-    final target = accountEmail.toLowerCase().trim();
+    OtpEntry? unknownRecipientFallback;
     for (final otp in _otpHistory) {
-      final r = otp.recipient?.toLowerCase().trim() ?? '';
-      if (r != target) continue;
       if (after != null && otp.timestamp.isBefore(after)) continue;
+      final recipient = otp.recipient?.trim() ?? '';
+      if (recipient.isEmpty) {
+        unknownRecipientFallback ??= otp;
+        continue;
+      }
+      if (!_sameEmailAddress(recipient, accountEmail)) continue;
       return otp;
     }
-    return null;
+    return unknownRecipientFallback;
+  }
+
+  bool _sameEmailAddress(String a, String b) =>
+      _normalizeEmail(a) == _normalizeEmail(b);
+
+  String _normalizeEmail(String email) {
+    final trimmed = email.toLowerCase().trim();
+    final at = trimmed.lastIndexOf('@');
+    if (at <= 0) return trimmed;
+
+    var local = trimmed.substring(0, at);
+    final domain = trimmed.substring(at + 1);
+    final plus = local.indexOf('+');
+    if (plus >= 0) local = local.substring(0, plus);
+
+    if (domain == 'gmail.com' || domain == 'googlemail.com') {
+      local = local.replaceAll('.', '');
+      return '$local@gmail.com';
+    }
+    return '$local@$domain';
   }
 
   Future<void> setAllAccountsMode(AccountMode mode) async {

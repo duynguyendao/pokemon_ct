@@ -1,4 +1,5 @@
 import 'package:uuid/uuid.dart';
+import '../services/otp_extractor.dart';
 
 enum FilterType { sender, subject, recipient, body, regex }
 
@@ -19,11 +20,16 @@ class FilterRule {
 
   String get typeLabel {
     switch (type) {
-      case FilterType.sender:    return 'Sender';
-      case FilterType.subject:   return 'Subject';
-      case FilterType.recipient: return 'Recipient';
-      case FilterType.body:      return 'Body';
-      case FilterType.regex:     return 'Regex';
+      case FilterType.sender:
+        return 'Sender';
+      case FilterType.subject:
+        return 'Subject';
+      case FilterType.recipient:
+        return 'Recipient';
+      case FilterType.body:
+        return 'Body';
+      case FilterType.regex:
+        return 'Regex';
     }
   }
 
@@ -38,56 +44,38 @@ class FilterRule {
       } catch (_) {}
     }
 
-    // Fallback patterns for common formats
-    final patterns = [
-      r'【パスコード】\s*(\d{6})',  // Japanese: 【パスコード】568661
-      r'(?:パスコード|コード)[:：]\s*(\d{6})',  // Japanese variant
-      r'\b(\d{6})\b',  // 6-digit code
-      r'(?:code|コード|passcode)[\s:：]*(\d{4,8})',  // English/Japanese mixed
-    ];
-
-    for (final pattern in patterns) {
-      try {
-        final match = RegExp(pattern, caseSensitive: false).firstMatch(text);
-        if (match != null) {
-          return match.group(1) ?? match.group(0);
-        }
-      } catch (_) {}
-    }
-
-    return null;
+    return extractOtpFromText(text);
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'type': type.name,
-        'pattern': pattern,
-        'extractPattern': extractPattern,
-        'enabled': enabled,
-      };
+    'id': id,
+    'type': type.name,
+    'pattern': pattern,
+    'extractPattern': extractPattern,
+    'enabled': enabled,
+  };
 
   factory FilterRule.fromJson(Map<String, dynamic> json) => FilterRule(
-        id: json['id'] as String?,
-        type: FilterType.values.firstWhere(
-          (e) => e.name == json['type'],
-          orElse: () => FilterType.sender,
-        ),
-        pattern: json['pattern'] as String,
-        extractPattern: json['extractPattern'] as String?,
-        enabled: json['enabled'] as bool? ?? true,
-      );
+    id: json['id'] as String?,
+    type: FilterType.values.firstWhere(
+      (e) => e.name == json['type'],
+      orElse: () => FilterType.sender,
+    ),
+    pattern: json['pattern'] as String,
+    extractPattern: json['extractPattern'] as String?,
+    enabled: json['enabled'] as bool? ?? true,
+  );
 
   FilterRule copyWith({
     FilterType? type,
     String? pattern,
     String? extractPattern,
     bool? enabled,
-  }) =>
-      FilterRule(
-        id: id,
-        type: type ?? this.type,
-        pattern: pattern ?? this.pattern,
-        extractPattern: extractPattern ?? this.extractPattern,
-        enabled: enabled ?? this.enabled,
-      );
+  }) => FilterRule(
+    id: id,
+    type: type ?? this.type,
+    pattern: pattern ?? this.pattern,
+    extractPattern: extractPattern ?? this.extractPattern,
+    enabled: enabled ?? this.enabled,
+  );
 }
