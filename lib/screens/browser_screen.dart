@@ -12,8 +12,19 @@ class BrowserScreen extends StatefulWidget {
   final Account account;
   final Proxy? proxy;
   final String? startUrl;
+  final bool isRunningAll;
+  final VoidCallback? onStopAll;
+  final VoidCallback? onSkipCurrent;
 
-  const BrowserScreen({super.key, required this.account, this.proxy, this.startUrl});
+  const BrowserScreen({
+    super.key,
+    required this.account,
+    this.proxy,
+    this.startUrl,
+    this.isRunningAll = false,
+    this.onStopAll,
+    this.onSkipCurrent,
+  });
 
   @override
   State<BrowserScreen> createState() => _BrowserScreenState();
@@ -39,6 +50,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // Thời điểm bấm ログイン — chỉ lấy OTP gửi SAU thời điểm này
   DateTime? _loginAttemptTime;
+
+  // Overlay for status text (above iOS platform WebView)
+  OverlayEntry? _statusOverlay;
 
   // JS để phát hiện field OTP và lỗi trên trang
   static const String _detectOtpFieldJs = '''
@@ -80,6 +94,57 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _initController(startUrl);
   }
 
+  void _showStatusOverlay(String text) {
+    _statusOverlay?.remove();
+    _statusOverlay = null;
+    if (text.isEmpty) return;
+
+    _statusOverlay = OverlayEntry(
+      builder: (_) => Positioned(
+        top: MediaQuery.of(context).padding.top + kToolbarHeight + 8,
+        left: 16,
+        right: 16,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.secondary),
+              boxShadow: [BoxShadow(color: Colors.black.withAlpha(120), blurRadius: 8)],
+            ),
+            child: Row(children: [
+              const SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation(AppColors.secondary)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(text,
+                  style: const TextStyle(color: Colors.white, fontSize: 13))),
+            ]),
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context).insert(_statusOverlay!);
+  }
+
+  void _setStatus(String text) {
+    if (!mounted) return;
+    setState(() => _statusText = text);
+    _showStatusOverlay(text);
+  }
+
+  @override
+  void dispose() {
+    _statusOverlay?.remove();
+    _statusOverlay = null;
+    super.dispose();
+  }
+
   bool _isLoginPage(String url) {
     final u = url.toLowerCase();
     return u.contains('/login') &&
@@ -107,15 +172,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
             _currentUrl = url;
             _loading = true;
             if (wasOnOtpPage && url != _lastOtpPageUrl) {
-              _statusText = '✅ OTP xác nhận thành công!';
               _otpAutoSubmitting = false;
               _lastOtpPageUrl = null;
             }
           });
-          if (wasOnOtpPage) {
+          if (wasOnOtpPage && url != _lastOtpPageUrl) {
+            _setStatus('✅ OTP xác nhận thành công!');
             Future.delayed(const Duration(seconds: 2), () {
               if (mounted && _statusText.contains('thành công')) {
-                setState(() => _statusText = '');
+                _setStatus('');
               }
             });
           }
@@ -163,6 +228,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if (!_otpAutoSubmitting && _lastOtpPageUrl != _currentUrl) {
         _lastOtpPageUrl = _currentUrl;
         _otpRetryCount = 0;
+        _setStatus('📡 Đang lấy OTP...');
         // Immediate fetch first, then auto-submit
         context.read<AppProvider>().fetchOtpNow().then((_) {
           if (mounted) _autoSubmitOtp();
@@ -182,9 +248,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // Status feedback từ buildOtpAutoSubmitScript
     if (message.contains('"type":"otpStatus"')) {
       if (message.contains('"status":"filled"')) {
-        setState(() => _statusText = '⌨️ Đã điền OTP...');
+        _setStatus('⌨️ Đã điền OTP...');
       } else if (message.contains('"status":"submitted"')) {
-        setState(() { _statusText = '⏳ Đang xác nhận...'; });
+        _setStatus('⏳ Đang xác nhận...');
         // Sau 3s kiểm tra lại xem có lỗi không hoặc đã chuyển trang
         Future.delayed(const Duration(seconds: 3), () {
           if (!mounted) return;
@@ -195,23 +261,25 @@ class _BrowserScreenState extends State<BrowserScreen> {
           } else {
             // Đã chuyển trang → OTP success!
             setState(() {
-              _statusText = '✅ OTP xác nhận thành công!';
               _otpAutoSubmitting = false;
               _lastOtpPageUrl = null;
             });
+            _setStatus('✅ OTP xác nhận thành công!');
             Future.delayed(const Duration(seconds: 2), () {
               if (mounted && _statusText.contains('thành công')) {
-                setState(() => _statusText = '');
+                _setStatus('');
               }
             });
           }
         });
       } else if (message.contains('"status":"noField"')) {
-        setState(() { _statusText = ''; _otpAutoSubmitting = false; });
+        setState(() => _otpAutoSubmitting = false);
+        _setStatus('');
       } else if (message.contains('"status":"noButton"')) {
-        setState(() { _statusText = '⚠️ Không thấy nút 認証する'; _otpAutoSubmitting = false; });
+        setState(() => _otpAutoSubmitting = false);
+        _setStatus('⚠️ Không thấy nút 認証する');
         Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) setState(() => _statusText = '');
+          if (mounted) _setStatus('');
         });
       }
     }
@@ -228,7 +296,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final otp = _getOtpForAccount();
 
     if (otp == null) {
-      setState(() => _statusText = '⏳ Chờ OTP cho ${widget.account.email}... (max 90s)');
+      _setStatus('⏳ Chờ OTP cho ${widget.account.email}...');
       for (int i = 0; i < 90; i++) {
         await Future.delayed(const Duration(seconds: 1));
         if (!mounted) return;
@@ -242,10 +310,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
           context.read<AppProvider>().fetchOtpNow();
         }
         if (mounted && i % 5 == 4) {
-          setState(() => _statusText = '⏳ Chờ OTP... ${i + 1}s/90s');
+          _setStatus('⏳ Chờ OTP... ${i + 1}s/90s');
         }
       }
-      if (mounted) setState(() { _statusText = '❌ Không nhận OTP sau 90s'; _otpAutoSubmitting = false; });
+      if (mounted) {
+        setState(() => _otpAutoSubmitting = false);
+        _setStatus('❌ Không nhận OTP sau 90s');
+      }
       return;
     }
 
@@ -257,18 +328,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
     setState(() {
       _otpAutoSubmitting = true;
       _lastSubmittedOtp = otp;
-      _statusText = '🔢 Điền OTP: $otp';
     });
+    _setStatus('🔢 Điền OTP: $otp');
     await _controller.runJavaScript(buildOtpAutoSubmitScript(otp));
   }
 
   void _handleOtpError() async {
     if (_otpRetryCount >= _maxOtpRetries) {
-      setState(() { _statusText = '❌ Sai OTP ${_maxOtpRetries} lần, dừng lại'; _otpAutoSubmitting = false; });
+      setState(() => _otpAutoSubmitting = false);
+      _setStatus('❌ Sai OTP ${_maxOtpRetries} lần, dừng lại');
       return;
     }
     _otpRetryCount++;
-    setState(() => _statusText = '❌ Sai OTP, chờ mã mới... (${_otpRetryCount}/$_maxOtpRetries)');
+    _setStatus('❌ Sai OTP, chờ mã mới... (${_otpRetryCount}/$_maxOtpRetries)');
 
     // Chờ OTP mới (khác mã vừa dùng) - 90s max
     for (int i = 0; i < 90; i++) {
@@ -284,18 +356,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
         context.read<AppProvider>().fetchOtpNow();
       }
     }
-    if (mounted) setState(() { _statusText = '❌ Không có OTP mới sau 90s'; _otpAutoSubmitting = false; });
+    if (mounted) {
+      setState(() => _otpAutoSubmitting = false);
+      _setStatus('❌ Không có OTP mới sau 90s');
+    }
   }
 
   Future<void> _autoFill({bool silent = false}) async {
     // Reset login timestamp khi bắt đầu lại flow login
     _loginAttemptTime = null;
-    setState(() { _autoFilling = true; _statusText = '📧 Điền email + password...'; });
+    setState(() => _autoFilling = true);
+    _setStatus('📧 Điền email + password...');
     try {
       await Future.delayed(const Duration(milliseconds: 300));
       await _controller.runJavaScript(
           buildAutoFillScript(widget.account.email, widget.account.password));
-      setState(() => _statusText = '🔐 Đang login...');
+      _setStatus('🔐 Đang login...');
       await Future.delayed(const Duration(milliseconds: 700));
 
       // Ghi lại thời điểm bấm ログイン — chỉ nhận OTP từ sau thời điểm này
@@ -319,9 +395,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
 })();
 ''');
       await Future.delayed(const Duration(seconds: 2));
-      if (mounted) setState(() => _statusText = '');
+      if (mounted) _setStatus('');
     } catch (_) {
-      if (mounted) setState(() => _statusText = '');
+      if (mounted) _setStatus('');
     } finally {
       if (mounted) setState(() => _autoFilling = false);
     }
@@ -390,7 +466,36 @@ class _BrowserScreenState extends State<BrowserScreen> {
           ],
         ),
         actions: [
-          if (widget.proxy != null)
+          if (widget.isRunningAll) ...[
+            if (widget.onSkipCurrent != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.warning,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                  ),
+                  onPressed: widget.onSkipCurrent,
+                  icon: const Icon(Icons.skip_next, size: 16),
+                  label: const Text('Skip', style: TextStyle(fontSize: 11)),
+                ),
+              ),
+            if (widget.onStopAll != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                  ),
+                  onPressed: widget.onStopAll,
+                  icon: const Icon(Icons.stop, size: 16),
+                  label: const Text('Stop All', style: TextStyle(fontSize: 11)),
+                ),
+              ),
+          ] else if (widget.proxy != null)
             IconButton(
               icon: const Icon(Icons.vpn_lock, color: AppColors.done, size: 20),
               onPressed: _showProxyInfo,
@@ -404,33 +509,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
             const LinearProgressIndicator(
               backgroundColor: AppColors.surfaceVariant,
               valueColor: AlwaysStoppedAnimation(AppColors.primary),
-            ),
-          if (_statusText.isNotEmpty)
-            Positioned(
-              top: 8, left: 16, right: 16,
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.card,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.secondary),
-                    boxShadow: [BoxShadow(color: Colors.black.withAlpha(120), blurRadius: 8)],
-                  ),
-                  child: Row(children: [
-                    const SizedBox(
-                      width: 16, height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation(AppColors.secondary)),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text(_statusText,
-                        style: const TextStyle(color: Colors.white, fontSize: 13))),
-                  ]),
-                ),
-              ),
             ),
         ],
       ),

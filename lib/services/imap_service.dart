@@ -109,16 +109,26 @@ class ImapService {
 
   Future<List<OtpEntry>> fetchNow() async {
     if (_config == null) return [];
-    // Always reconnect fresh để tránh stale/dead connections
-    _log('FETCH', 'Forcing fresh reconnect...');
+    _log('FETCH', 'Fetching...');
     try {
-      await _closeClient();
-      await _connect();
+      // Reuse existing connection if alive (much faster)
+      if (_client == null) {
+        _log('FETCH', 'No connection, connecting...');
+        await _connect();
+      }
       return await _poll();
     } catch (e) {
-      _log('FETCH', 'Error: $e');
-      await _closeClient();
-      return [];
+      // Connection dead — reconnect once and retry
+      _log('FETCH', 'Connection error ($e), reconnecting...');
+      try {
+        await _closeClient();
+        await _connect();
+        return await _poll();
+      } catch (e2) {
+        _log('FETCH', 'Retry failed: $e2');
+        await _closeClient();
+        return [];
+      }
     }
   }
 

@@ -193,7 +193,20 @@ class _HomeScreenState extends State<HomeScreen>
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => BrowserScreen(account: account, proxy: proxy, startUrl: startUrl),
+          builder: (_) => BrowserScreen(
+            account: account,
+            proxy: proxy,
+            startUrl: startUrl,
+            isRunningAll: _runningAll,
+            onStopAll: _runningAll ? () {
+              setState(() => _stopAllRequested = true);
+              Navigator.pop(context);
+            } : null,
+            onSkipCurrent: _runningAll ? () {
+              setState(() => _stopCurrentRequested = true);
+              Navigator.pop(context);
+            } : null,
+          ),
         ),
       );
     }
