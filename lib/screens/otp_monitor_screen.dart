@@ -24,7 +24,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   final _portCtrl = TextEditingController(text: '993');
   final _userCtrl = TextEditingController(text: 'duynguyenpk8793@gmail.com');
   final _passCtrl = TextEditingController();
-  final _pollCtrl = TextEditingController(text: '2');
+  final _pollCtrl = TextEditingController(text: '2'); // 2 seconds = fastest
 
   // URL config
   final _loginUrlCtrl = TextEditingController(text: 'https://www.pokemoncenter-online.com/login/');

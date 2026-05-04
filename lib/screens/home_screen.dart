@@ -604,21 +604,31 @@ class _HomeScreenState extends State<HomeScreen>
         actions: [
           if (_runningAll) ...[
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                '${_runAllIndex + 1}/${_runAllList.length}',
-                style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                child: Text(
+                  '${_runAllIndex + 1}/${_runAllList.length}',
+                  style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16),
+                ),
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.skip_next, color: AppColors.warning),
-              tooltip: 'Stop current account, go next',
-              onPressed: () => setState(() => _stopCurrentRequested = true),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.warning),
+                onPressed: () => setState(() => _stopCurrentRequested = true),
+                icon: const Icon(Icons.skip_next, size: 18),
+                label: const Text('Skip', style: TextStyle(fontSize: 12)),
+              ),
             ),
-            IconButton(
-              icon: const Icon(Icons.stop_circle, color: AppColors.error),
-              tooltip: 'Stop all',
-              onPressed: () => setState(() => _stopAllRequested = true),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+                onPressed: () => setState(() => _stopAllRequested = true),
+                icon: const Icon(Icons.stop, size: 18),
+                label: const Text('Stop', style: TextStyle(fontSize: 12)),
+              ),
             ),
           ] else if (_batchMode) ...[
             Text('${_selected.length} đã chọn',

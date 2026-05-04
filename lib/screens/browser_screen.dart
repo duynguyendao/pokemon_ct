@@ -149,7 +149,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if (!_otpAutoSubmitting && _lastOtpPageUrl != _currentUrl) {
         _lastOtpPageUrl = _currentUrl;
         _otpRetryCount = 0;
-        _autoSubmitOtp();
+        // Immediate fetch first, then auto-submit
+        context.read<AppProvider>().fetchOtpNow().then((_) {
+          if (mounted) _autoSubmitOtp();
+        });
       }
       return;
     }
@@ -261,7 +264,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
       await _controller.runJavaScript('''
 (function() {
-  var btns = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
+  // Try direct lottery button first
+  var lotteryBtn = document.querySelector('a.loginBtn, a.btn.loginBtn');
+  if (lotteryBtn) { lotteryBtn.click(); return; }
+
+  // Fallback: search by text
+  var btns = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"], a.btn'));
   for (var i = 0; i < btns.length; i++) {
     var t = btns[i].textContent || btns[i].value || '';
     if (t.indexOf('ログイン') >= 0 || t.indexOf('送信') >= 0 ||
