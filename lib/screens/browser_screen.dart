@@ -346,12 +346,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
     String? excludeCode,
   }) async {
     final provider = context.read<AppProvider>();
-    if (!provider.imapRunning) {
-      _setStatus('Dang khoi dong OTP server...');
-      final ready = await provider.ensureOtpServerRunning();
+    if (!provider.imapRunning && !provider.imapStarting) {
+      _setStatus('🔄 Khởi động OTP server...');
+      await provider.startImap();
       if (!mounted) return null;
-      if (!ready) {
-        _setStatus('OTP server khong chay. Kiem tra IMAP trong OTP Monitor.');
+      if (provider.imapError != null) {
+        _setStatus('❌ Lỗi: ${provider.imapError}');
         return null;
       }
     }
@@ -629,6 +629,44 @@ class _BrowserScreenState extends State<BrowserScreen> {
               backgroundColor: AppColors.surfaceVariant,
               valueColor: AlwaysStoppedAnimation(AppColors.primary),
             ),
+          // IMAP status banner
+          Consumer<AppProvider>(
+            builder: (_, provider, __) {
+              String statusText = '';
+              Color statusColor = Colors.transparent;
+              if (provider.imapStarting) {
+                statusText = '🔄 OTP server khởi động...';
+                statusColor = AppColors.warning;
+              } else if (provider.imapError != null) {
+                statusText = '❌ OTP server lỗi: ${provider.imapError}';
+                statusColor = AppColors.error;
+              } else if (provider.imapRunning) {
+                statusText = '✅ OTP server sẵn sàng';
+                statusColor = AppColors.done;
+              }
+
+              if (statusText.isEmpty) return const SizedBox.shrink();
+
+              return Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  color: statusColor.withAlpha(40),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
       bottomNavigationBar: Container(
