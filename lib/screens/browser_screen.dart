@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/account.dart';
+import '../models/otp_entry.dart';
 import '../models/proxy.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
@@ -112,19 +114,29 @@ class _BrowserScreenState extends State<BrowserScreen> {
               color: AppColors.card,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.secondary),
-              boxShadow: [BoxShadow(color: Colors.black.withAlpha(120), blurRadius: 8)],
+              boxShadow: [
+                BoxShadow(color: Colors.black.withAlpha(120), blurRadius: 8),
+              ],
             ),
-            child: Row(children: [
-              const SizedBox(
-                width: 16, height: 16,
-                child: CircularProgressIndicator(
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation(AppColors.secondary)),
-              ),
-              const SizedBox(width: 10),
-              Expanded(child: Text(text,
-                  style: const TextStyle(color: Colors.white, fontSize: 13))),
-            ]),
+                    valueColor: AlwaysStoppedAnimation(AppColors.secondary),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    text,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -164,54 +176,64 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (url) {
-          // Nếu đang ở trang OTP và URL thay đổi → clear status "Đang xác nhận"
-          final wasOnOtpPage = _lastOtpPageUrl != null && _currentUrl == _lastOtpPageUrl;
-          setState(() {
-            _currentUrl = url;
-            _loading = true;
-            if (wasOnOtpPage && url != _lastOtpPageUrl) {
-              _otpAutoSubmitting = false;
-              _lastOtpPageUrl = null;
-            }
-          });
-          if (wasOnOtpPage && url != _lastOtpPageUrl) {
-            _setStatus('✅ OTP xác nhận thành công!');
-            Future.delayed(const Duration(seconds: 2), () {
-              if (mounted && _statusText.contains('thành công')) {
-                _setStatus('');
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: (url) {
+            // Nếu đang ở trang OTP và URL thay đổi → clear status "Đang xác nhận"
+            final wasOnOtpPage =
+                _lastOtpPageUrl != null && _currentUrl == _lastOtpPageUrl;
+            setState(() {
+              _currentUrl = url;
+              _loading = true;
+              if (wasOnOtpPage && url != _lastOtpPageUrl) {
+                _otpAutoSubmitting = false;
+                _lastOtpPageUrl = null;
               }
             });
-          }
-          if (p.fakeBrowser) {
-            _controller.runJavaScript(buildAntiFingerprintScript(_profile));
-          }
-        },
-        onPageFinished: (url) async {
-          setState(() { _currentUrl = url; _loading = false; });
-          _controller.canGoBack().then((v) => setState(() => _canGoBack = v));
-          _controller.canGoForward().then((v) => setState(() => _canGoForward = v));
+            if (wasOnOtpPage && url != _lastOtpPageUrl) {
+              _setStatus('✅ OTP xác nhận thành công!');
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted && _statusText.contains('thành công')) {
+                  _setStatus('');
+                }
+              });
+            }
+            if (p.fakeBrowser) {
+              _controller.runJavaScript(buildAntiFingerprintScript(_profile));
+            }
+          },
+          onPageFinished: (url) async {
+            setState(() {
+              _currentUrl = url;
+              _loading = false;
+            });
+            _controller.canGoBack().then((v) => setState(() => _canGoBack = v));
+            _controller.canGoForward().then(
+              (v) => setState(() => _canGoForward = v),
+            );
 
-          if (p.fakeBrowser) {
-            await _controller.runJavaScript(buildAntiFingerprintScript(_profile));
-          }
+            if (p.fakeBrowser) {
+              await _controller.runJavaScript(
+                buildAntiFingerprintScript(_profile),
+              );
+            }
 
-          // Auto-fill email + password trên trang login
-          if (_isLoginPage(url) && _lastAutoFillUrl != url && !_autoFilling) {
-            _lastAutoFillUrl = url;
-            await Future.delayed(const Duration(milliseconds: 700));
-            await _autoFill(silent: true);
-          }
+            // Auto-fill email + password trên trang login
+            if (_isLoginPage(url) && _lastAutoFillUrl != url && !_autoFilling) {
+              _lastAutoFillUrl = url;
+              await Future.delayed(const Duration(milliseconds: 700));
+              await _autoFill(silent: true);
+            }
 
-          // Dùng JS để phát hiện field OTP — không phụ thuộc vào URL
-          await Future.delayed(const Duration(milliseconds: 800));
-          if (mounted) {
-            await _controller.runJavaScript(_detectOtpFieldJs);
-          }
-        },
-        onWebResourceError: (_) => setState(() => _loading = false),
-      ))
+            // Dùng JS để phát hiện field OTP — không phụ thuộc vào URL
+            await Future.delayed(const Duration(milliseconds: 800));
+            if (mounted) {
+              await _controller.runJavaScript(_detectOtpFieldJs);
+            }
+          },
+          onWebResourceError: (_) => setState(() => _loading = false),
+        ),
+      )
       ..addJavaScriptChannel(
         'FlutterChannel',
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
@@ -223,22 +245,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   void _handleJsMessage(String message) {
     // OTP field phát hiện → auto submit
-    if (message.contains('"type":"otpField"') && message.contains('"detected":true')) {
+    if (message.contains('"type":"otpField"') &&
+        message.contains('"detected":true')) {
       // Chỉ trigger 1 lần cho mỗi URL để tránh spam
       if (!_otpAutoSubmitting && _lastOtpPageUrl != _currentUrl) {
         _lastOtpPageUrl = _currentUrl;
         _otpRetryCount = 0;
         _setStatus('📡 Đang lấy OTP...');
-        // Immediate fetch first, then auto-submit
-        context.read<AppProvider>().fetchOtpNow().then((_) {
-          if (mounted) _autoSubmitOtp();
-        });
+        unawaited(_autoSubmitOtp());
       }
       return;
     }
 
     // Phát hiện lỗi OTP → retry
-    if (message.contains('"type":"otpError"') && message.contains('"detected":true')) {
+    if (message.contains('"type":"otpError"') &&
+        message.contains('"detected":true')) {
       if (_otpAutoSubmitting || _lastOtpPageUrl == _currentUrl) {
         _handleOtpError();
       }
@@ -285,38 +306,99 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
-  String? _getOtpForAccount() =>
-      context.read<AppProvider>().latestOtpForEmail(
-        widget.account.email,
-        after: _loginAttemptTime,
-      );
+  String? _getOtpForAccount() => context.read<AppProvider>().latestOtpForEmail(
+    widget.account.email,
+    after: _loginAttemptTime,
+  );
+
+  bool _matchesCurrentAccountOtp(OtpEntry otp, {String? excludeCode}) {
+    final recipient = otp.recipient?.toLowerCase().trim() ?? '';
+    final target = widget.account.email.toLowerCase().trim();
+    if (recipient != target) return false;
+    if (_loginAttemptTime != null &&
+        otp.timestamp.isBefore(_loginAttemptTime!)) {
+      return false;
+    }
+    return excludeCode == null || otp.code != excludeCode;
+  }
+
+  Future<String?> _waitForOtpForAccount({
+    required Duration timeout,
+    String? excludeCode,
+  }) async {
+    final existing = _getOtpForAccount();
+    if (existing != null && existing != excludeCode) return existing;
+
+    final provider = context.read<AppProvider>();
+    final completer = Completer<String?>();
+    StreamSubscription<OtpEntry>? sub;
+    Timer? timeoutTimer;
+    Timer? fetchTimer;
+    Timer? statusTimer;
+    var elapsedSeconds = 0;
+
+    void finish(String? code) {
+      if (completer.isCompleted) return;
+      unawaited(sub?.cancel());
+      timeoutTimer?.cancel();
+      fetchTimer?.cancel();
+      statusTimer?.cancel();
+      completer.complete(code);
+    }
+
+    Future<void> fetchAndCheck() async {
+      if (!mounted) {
+        finish(null);
+        return;
+      }
+      final results = await provider.fetchOtpNow();
+      if (!mounted || completer.isCompleted) return;
+      for (final otp in results) {
+        if (_matchesCurrentAccountOtp(otp, excludeCode: excludeCode)) {
+          finish(otp.code);
+          return;
+        }
+      }
+      final latest = _getOtpForAccount();
+      if (latest != null && latest != excludeCode) finish(latest);
+    }
+
+    sub = provider.otpStream.listen((otp) {
+      if (!mounted) {
+        finish(null);
+        return;
+      }
+      if (_matchesCurrentAccountOtp(otp, excludeCode: excludeCode)) {
+        finish(otp.code);
+      }
+    });
+
+    timeoutTimer = Timer(timeout, () => finish(null));
+    fetchTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(fetchAndCheck()),
+    );
+    statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      elapsedSeconds += 5;
+      if (mounted && !completer.isCompleted) {
+        _setStatus('Cho OTP... $elapsedSeconds/${timeout.inSeconds}s');
+      }
+    });
+
+    unawaited(fetchAndCheck());
+    return completer.future;
+  }
 
   Future<void> _autoSubmitOtp() async {
     if (!mounted) return;
-    final otp = _getOtpForAccount();
-
+    _setStatus('Dang lay OTP...');
+    final otp = await _waitForOtpForAccount(
+      timeout: const Duration(seconds: 90),
+    );
+    if (!mounted) return;
     if (otp == null) {
-      _setStatus('⏳ Chờ OTP cho ${widget.account.email}...');
-      for (int i = 0; i < 90; i++) {
-        await Future.delayed(const Duration(seconds: 1));
-        if (!mounted) return;
-        final newOtp = _getOtpForAccount();
-        if (newOtp != null) {
-          await _doSubmitOtp(newOtp);
-          return;
-        }
-        // Trigger fresh fetch every 10s
-        if (i % 10 == 9 && mounted) {
-          context.read<AppProvider>().fetchOtpNow();
-        }
-        if (mounted && i % 5 == 4) {
-          _setStatus('⏳ Chờ OTP... ${i + 1}s/90s');
-        }
-      }
-      if (mounted) {
-        setState(() => _otpAutoSubmitting = false);
-        _setStatus('❌ Không nhận OTP sau 90s');
-      }
+      setState(() => _otpAutoSubmitting = false);
+      _setStatus('Khong nhan OTP sau 90s');
       return;
     }
 
@@ -336,30 +418,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void _handleOtpError() async {
     if (_otpRetryCount >= _maxOtpRetries) {
       setState(() => _otpAutoSubmitting = false);
-      _setStatus('❌ Sai OTP ${_maxOtpRetries} lần, dừng lại');
+      _setStatus('❌ Sai OTP $_maxOtpRetries lần, dừng lại');
       return;
     }
     _otpRetryCount++;
-    _setStatus('❌ Sai OTP, chờ mã mới... (${_otpRetryCount}/$_maxOtpRetries)');
+    _setStatus('Sai OTP, dang cho ma moi... ($_otpRetryCount/$_maxOtpRetries)');
 
-    // Chờ OTP mới (khác mã vừa dùng) - 90s max
-    for (int i = 0; i < 90; i++) {
-      await Future.delayed(const Duration(seconds: 1));
-      if (!mounted) return;
-      final newOtp = _getOtpForAccount();
-      if (newOtp != null && newOtp != _lastSubmittedOtp) {
-        await _doSubmitOtp(newOtp);
-        return;
-      }
-      // Trigger fresh fetch every 10s
-      if (i % 10 == 9 && mounted) {
-        context.read<AppProvider>().fetchOtpNow();
-      }
+    final newOtp = await _waitForOtpForAccount(
+      timeout: const Duration(seconds: 90),
+      excludeCode: _lastSubmittedOtp,
+    );
+    if (!mounted) return;
+    if (newOtp != null) {
+      await _doSubmitOtp(newOtp);
+      return;
     }
-    if (mounted) {
-      setState(() => _otpAutoSubmitting = false);
-      _setStatus('❌ Không có OTP mới sau 90s');
-    }
+    setState(() => _otpAutoSubmitting = false);
+    _setStatus('Khong co OTP moi sau 90s');
   }
 
   Future<void> _autoFill({bool silent = false}) async {
@@ -370,7 +445,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     try {
       await Future.delayed(const Duration(milliseconds: 300));
       await _controller.runJavaScript(
-          buildAutoFillScript(widget.account.email, widget.account.password));
+        buildAutoFillScript(widget.account.email, widget.account.password),
+      );
       _setStatus('🔐 Đang login...');
       await Future.delayed(const Duration(milliseconds: 700));
 
@@ -409,9 +485,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.card,
-        title: const Text('Thông tin Proxy', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Thông tin Proxy',
+          style: TextStyle(color: Colors.white),
+        ),
         content: proxy == null
-            ? const Text('Không dùng proxy', style: TextStyle(color: AppColors.textSecondary))
+            ? const Text(
+                'Không dùng proxy',
+                style: TextStyle(color: AppColors.textSecondary),
+              )
             : Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -431,19 +513,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
               },
               child: const Text('Copy URL'),
             ),
-          ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
   }
 
   Widget _infoRow(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(children: [
-          Text('$label: ', style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-          Flexible(child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 13))),
-        ]),
-      );
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(
+      children: [
+        Text(
+          '$label: ',
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+        ),
+        Flexible(
+          child: Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+          ),
+        ),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -455,12 +550,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.account.email,
-                style: const TextStyle(fontSize: 13, color: Colors.white),
-                overflow: TextOverflow.ellipsis),
             Text(
-              _currentUrl.length > 45 ? '${_currentUrl.substring(0, 45)}...' : _currentUrl,
-              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+              widget.account.email,
+              style: const TextStyle(fontSize: 13, color: Colors.white),
+              overflow: TextOverflow.ellipsis,
+            ),
+            Text(
+              _currentUrl.length > 45
+                  ? '${_currentUrl.substring(0, 45)}...'
+                  : _currentUrl,
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondary,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ],
@@ -473,7 +575,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.warning,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     minimumSize: Size.zero,
                   ),
                   onPressed: widget.onSkipCurrent,
@@ -487,7 +592,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.error,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     minimumSize: Size.zero,
                   ),
                   onPressed: widget.onStopAll,
@@ -520,56 +628,83 @@ class _BrowserScreenState extends State<BrowserScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               // Quick nav
-              Row(children: [
-                _urlBtn('Login', p.loginUrl, AppColors.primary),
-                const SizedBox(width: 6),
-                if (p.lotteryUrl.isNotEmpty) ...[
-                  _urlBtn('Lottery', p.lotteryUrl, AppColors.secondary),
+              Row(
+                children: [
+                  _urlBtn('Login', p.loginUrl, AppColors.primary),
                   const SizedBox(width: 6),
-                ],
-                if (p.lotteryResultUrl.isNotEmpty)
-                  _urlBtn('Result', p.lotteryResultUrl, AppColors.done),
-                const Spacer(),
-                ElevatedButton.icon(
-                  onPressed: _autoFilling ? null : _autoFill,
-                  icon: _autoFilling
-                      ? const SizedBox(width: 12, height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.auto_fix_high, size: 14),
-                  label: Text(_autoFilling ? '...' : 'Tự điền',
-                      style: const TextStyle(fontSize: 11)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _autoFilling ? AppColors.card : AppColors.secondary,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    minimumSize: Size.zero,
+                  if (p.lotteryUrl.isNotEmpty) ...[
+                    _urlBtn('Lottery', p.lotteryUrl, AppColors.secondary),
+                    const SizedBox(width: 6),
+                  ],
+                  if (p.lotteryResultUrl.isNotEmpty)
+                    _urlBtn('Result', p.lotteryResultUrl, AppColors.done),
+                  const Spacer(),
+                  ElevatedButton.icon(
+                    onPressed: _autoFilling ? null : _autoFill,
+                    icon: _autoFilling
+                        ? const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_fix_high, size: 14),
+                    label: Text(
+                      _autoFilling ? '...' : 'Tự điền',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _autoFilling
+                          ? AppColors.card
+                          : AppColors.secondary,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      minimumSize: Size.zero,
+                    ),
                   ),
-                ),
-              ]),
+                ],
+              ),
               // Browser controls
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   IconButton(
-                    icon: Icon(Icons.arrow_back_ios, size: 18,
-                        color: _canGoBack ? Colors.white : AppColors.textSecondary),
+                    icon: Icon(
+                      Icons.arrow_back_ios,
+                      size: 18,
+                      color: _canGoBack
+                          ? Colors.white
+                          : AppColors.textSecondary,
+                    ),
                     onPressed: _canGoBack ? () => _controller.goBack() : null,
                   ),
                   IconButton(
-                    icon: Icon(Icons.arrow_forward_ios, size: 18,
-                        color: _canGoForward ? Colors.white : AppColors.textSecondary),
-                    onPressed: _canGoForward ? () => _controller.goForward() : null,
+                    icon: Icon(
+                      Icons.arrow_forward_ios,
+                      size: 18,
+                      color: _canGoForward
+                          ? Colors.white
+                          : AppColors.textSecondary,
+                    ),
+                    onPressed: _canGoForward
+                        ? () => _controller.goForward()
+                        : null,
                   ),
                   IconButton(
                     icon: const Icon(Icons.refresh, size: 18),
                     onPressed: () {
                       // Reset state khi reload để trigger lại detection
-                      setState(() { _lastOtpPageUrl = null; _otpAutoSubmitting = false; });
+                      setState(() {
+                        _lastOtpPageUrl = null;
+                        _otpAutoSubmitting = false;
+                      });
                       _controller.reload();
                     },
                   ),
                   // OTP display — nhấn để fill + submit thủ công
                   Consumer<AppProvider>(
-                    builder: (_, prov, __) {
+                    builder: (context, prov, child) {
                       final otp = prov.latestOtpForEmail(
                         widget.account.email,
                         after: _loginAttemptTime,
@@ -577,24 +712,38 @@ class _BrowserScreenState extends State<BrowserScreen> {
                       return GestureDetector(
                         onTap: otp != null ? () => _doSubmitOtp(otp) : null,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
-                            color: otp != null ? AppColors.done : AppColors.card,
+                            color: otp != null
+                                ? AppColors.done
+                                : AppColors.card,
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            const Icon(Icons.sms, size: 14, color: Colors.white),
-                            const SizedBox(width: 4),
-                            Text(
-                              otp ?? 'OTP',
-                              style: TextStyle(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.sms,
+                                size: 14,
                                 color: Colors.white,
-                                fontWeight: otp != null ? FontWeight.bold : FontWeight.normal,
-                                fontSize: 13,
-                                letterSpacing: otp != null ? 2 : 0,
                               ),
-                            ),
-                          ]),
+                              const SizedBox(width: 4),
+                              Text(
+                                otp ?? 'OTP',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: otp != null
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  fontSize: 13,
+                                  letterSpacing: otp != null ? 2 : 0,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     },
@@ -609,21 +758,30 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Widget _urlBtn(String label, String url, Color color) => GestureDetector(
-        onTap: () {
-          if (url.isNotEmpty) {
-            setState(() { _lastOtpPageUrl = null; _otpAutoSubmitting = false; });
-            _controller.loadRequest(Uri.parse(url));
-          }
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: color.withAlpha(30),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: color.withAlpha(120)),
-          ),
-          child: Text(label,
-              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+    onTap: () {
+      if (url.isNotEmpty) {
+        setState(() {
+          _lastOtpPageUrl = null;
+          _otpAutoSubmitting = false;
+        });
+        _controller.loadRequest(Uri.parse(url));
+      }
+    },
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withAlpha(30),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withAlpha(120)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
         ),
-      );
+      ),
+    ),
+  );
 }

@@ -37,9 +37,11 @@ class AppProvider extends ChangeNotifier {
   List<String> get groups => _groups;
   List<FilterRule> get filterRules => _filterRules;
   List<OtpEntry> get otpHistory => _otpHistory;
+  Stream<OtpEntry> get otpStream => _imap.otpStream;
   Map<String, String> get imapConfig => _imapConfig;
   Map<String, String> get urlConfig => _urlConfig;
-  String get loginUrl => _urlConfig['loginUrl'] ?? 'https://www.pokemoncenter-online.com/login/';
+  String get loginUrl =>
+      _urlConfig['loginUrl'] ?? 'https://www.pokemoncenter-online.com/login/';
   String get lotteryUrl => _urlConfig['lotteryUrl'] ?? '';
   String get lotteryResultUrl => _urlConfig['lotteryResultUrl'] ?? '';
   String get defaultPassword => _defaultPassword;
@@ -54,8 +56,12 @@ class AppProvider extends ChangeNotifier {
   int get todoCount => _accounts.where((a) => a.status == 'todo').length;
   int get doneCount => _accounts.where((a) => a.status == 'done').length;
 
-  Proxy? getProxyById(String? id) =>
-      id == null ? null : _proxies.cast<Proxy?>().firstWhere((p) => p?.id == id, orElse: () => null);
+  Proxy? getProxyById(String? id) => id == null
+      ? null
+      : _proxies.cast<Proxy?>().firstWhere(
+          (p) => p?.id == id,
+          orElse: () => null,
+        );
 
   Proxy? get nextProxy {
     final enabled = _proxies.where((p) => p.enabled).toList();
@@ -83,8 +89,11 @@ class AppProvider extends ChangeNotifier {
   void _setupOtpStream() {
     _otpSub?.cancel();
     _otpSub = _imap.otpStream.listen((otp) {
-      if (!_otpHistory.any((e) => e.code == otp.code &&
-          otp.timestamp.difference(e.timestamp).abs().inSeconds < 30)) {
+      if (!_otpHistory.any(
+        (e) =>
+            e.code == otp.code &&
+            otp.timestamp.difference(e.timestamp).abs().inSeconds < 30,
+      )) {
         _otpHistory.insert(0, otp);
         if (_otpHistory.length > 50) _otpHistory.removeLast();
         notifyListeners();
@@ -142,11 +151,13 @@ class AppProvider extends ChangeNotifier {
       if (parts.length >= 2) {
         final email = parts[0].trim();
         final password = parts.sublist(1).join(':').trim();
-        result.add(Account(
-          email: email,
-          password: password.isNotEmpty ? password : _defaultPassword,
-          group: group,
-        ));
+        result.add(
+          Account(
+            email: email,
+            password: password.isNotEmpty ? password : _defaultPassword,
+            group: group,
+          ),
+        );
       }
     }
     return result;
@@ -336,13 +347,16 @@ class AppProvider extends ChangeNotifier {
 
     if (host == null || user == null || pass == null) return null;
 
+    final parsedPoll = int.tryParse(pollStr ?? '') ?? 2;
+    final fastPoll = parsedPoll.clamp(1, 5).toInt();
+
     return ImapConfig(
       host: host,
       port: int.tryParse(portStr ?? '') ?? 993,
       username: user,
       password: pass,
       isSecure: (int.tryParse(portStr ?? '') ?? 993) == 993,
-      pollIntervalSeconds: int.tryParse(pollStr ?? '') ?? 30,
+      pollIntervalSeconds: fastPoll,
     );
   }
 
