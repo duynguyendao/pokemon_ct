@@ -204,33 +204,26 @@ class ImapService {
     Duration maxAge = const Duration(minutes: 2),
   }) async {
     final client = ImapClient();
+    final stopwatch = Stopwatch()..start();
 
     try {
-      await _connectClient(client, host, port, username, password);
+      final inbox = await _connectClient(
+        client,
+        host,
+        port,
+        username,
+        password,
+      );
 
       final otps = <OtpEntry>[];
-      for (final mailbox in const ['INBOX']) {
-        if (otps.isNotEmpty || !await _trySelectMailbox(client, mailbox)) {
-          break;
-        }
+      final latestSequence = _latestInboxSequence(inbox, maxMessages);
 
-        final since = DateTime.now().subtract(maxAge);
-        final searchResult = await _searchForMessages(client, from: since);
-        final sequence = searchResult.matchingSequence;
-
-        if (sequence == null || sequence.isEmpty) {
-          continue;
-        }
-
-        final ids = sequence.toList().reversed.take(maxMessages).toList();
+      if (latestSequence != null) {
         _log(
           'FETCH_NOW',
-          '$mailbox matched ${sequence.length}, fetching ${ids.length}',
+          'Fetching latest $maxMessages from INBOX (${inbox.messagesExists} total)',
         );
-        final fetched = await _fetchLeanMessages(
-          client,
-          MessageSequence.fromIds(ids),
-        );
+        final fetched = await _fetchLeanMessages(client, latestSequence);
 
         for (final message in fetched.messages) {
           final sender =
@@ -265,7 +258,10 @@ class ImapService {
         }
       }
 
-      _log('FETCH_NOW', 'Found ${otps.length} OTP(s)');
+      _log(
+        'FETCH_NOW',
+        'Found ${otps.length} OTP(s) in ${stopwatch.elapsedMilliseconds}ms',
+      );
       return otps;
     } finally {
       try {
@@ -275,6 +271,16 @@ class ImapService {
         await client.disconnect();
       } catch (_) {}
     }
+  }
+
+  MessageSequence? _latestInboxSequence(Mailbox inbox, int maxMessages) {
+    final latest = inbox.messagesExists;
+    if (latest <= 0 || maxMessages <= 0) {
+      return null;
+    }
+
+    final first = latest - maxMessages + 1;
+    return MessageSequence.fromRange(first < 1 ? 1 : first, latest);
   }
 
   Future<void> start({
@@ -475,7 +481,7 @@ class ImapService {
     return client.fetchMessages(sequence, '(UID BODY.PEEK[])');
   }
 
-  Future<void> _connectClient(
+  Future<Mailbox> _connectClient(
     ImapClient client,
     String host,
     int port,
@@ -495,19 +501,34 @@ class ImapService {
     await client.login(username, normalizePassword(password));
     _log('CONNECT', 'Login OK in ${stopwatch.elapsedMilliseconds}ms');
 
-    await client.selectInbox();
+    final inbox = await _selectInboxFast(client);
     _log('CONNECT', 'INBOX selected in ${stopwatch.elapsedMilliseconds}ms');
+    return inbox;
   }
 
   Future<bool> _trySelectMailbox(ImapClient client, String mailbox) async {
     try {
-      await client.selectMailboxByPath(mailbox);
+      if (mailbox.toUpperCase() == 'INBOX') {
+        await _selectInboxFast(client);
+      } else {
+        await client.selectMailboxByPath(mailbox);
+      }
       _log('MAILBOX', 'Selected $mailbox');
       return true;
     } catch (e) {
       _log('MAILBOX', 'Cannot select $mailbox: $e');
       return false;
     }
+  }
+
+  Future<Mailbox> _selectInboxFast(ImapClient client) {
+    final inbox = Mailbox(
+      encodedName: 'INBOX',
+      encodedPath: 'INBOX',
+      flags: [MailboxFlag.inbox],
+      pathSeparator: '/',
+    );
+    return client.selectMailbox(inbox);
   }
 
   Future<SearchImapResult> _searchForMessages(
