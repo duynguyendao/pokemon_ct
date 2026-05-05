@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:enough_mail/enough_mail.dart';
+// ignore: implementation_imports
+import 'package:enough_mail/src/private/util/client_base.dart';
 import '../models/otp_entry.dart';
-import '../models/filter_rule.dart';
 import 'debug_service.dart';
 
 void _log(String tag, String msg) {
@@ -41,9 +43,48 @@ class _IdleNewMail {
   }
 }
 
+class _TurboImapClient extends ImapClient {
+  Completer<ConnectionInfo>? _connectionReady;
+
+  Future<ConnectionInfo> connectSocketAndWait(
+    Socket socket,
+    ConnectionInfo connectionInfo,
+    Duration timeout,
+  ) {
+    _connectionReady = Completer<ConnectionInfo>();
+    connect(socket, connectionInformation: connectionInfo);
+    return _connectionReady!.future.timeout(timeout);
+  }
+
+  @override
+  FutureOr<void> onConnectionEstablished(
+    ConnectionInfo connectionInfo,
+    String serverGreeting,
+  ) {
+    final result = super.onConnectionEstablished(
+      connectionInfo,
+      serverGreeting,
+    );
+    Future.sync(() => result).then(
+      (_) {
+        final ready = _connectionReady;
+        if (ready != null && !ready.isCompleted) {
+          ready.complete(connectionInfo);
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        final ready = _connectionReady;
+        if (ready != null && !ready.isCompleted) {
+          ready.completeError(error, stackTrace);
+        }
+      },
+    );
+    return result;
+  }
+}
+
 class ImapService {
   static const _connectTimeout = Duration(seconds: 6);
-  static const _prioritySubjectKeywords = ['【パスコード】'];
 
   ImapClient? _client;
   bool _isRunning = false;
@@ -55,7 +96,6 @@ class ImapService {
   int? _lastExists;
 
   final Set<int> _processedUids = {};
-  List<FilterRule> _rules = [];
 
   final _otpController = StreamController<OtpEntry>.broadcast();
   Stream<OtpEntry> get otpStream => _otpController.stream;
@@ -65,17 +105,13 @@ class ImapService {
     return password.replaceAll(RegExp(r'\s+'), '');
   }
 
-  void setRules(List<FilterRule> rules) {
-    _rules = rules.where((r) => r.enabled).toList();
-  }
-
   Future<void> testConnection({
     required String host,
     required int port,
     required String username,
     required String password,
   }) async {
-    final client = ImapClient();
+    final client = _TurboImapClient();
 
     try {
       await _connectClient(client, host, port, username, password);
@@ -102,7 +138,7 @@ class ImapService {
     DateTime? to,
     int maxMessages = 20,
   }) async {
-    final client = ImapClient();
+    final client = _TurboImapClient();
 
     try {
       await _connectClient(client, host, port, username, password);
@@ -205,7 +241,7 @@ class ImapService {
     int maxMessages = 3,
     Duration maxAge = const Duration(minutes: 2),
   }) async {
-    final client = ImapClient();
+    final client = _TurboImapClient();
     final stopwatch = Stopwatch()..start();
 
     try {
@@ -218,16 +254,14 @@ class ImapService {
       );
 
       final otps = <OtpEntry>[];
-      final latestSequence =
-          await _prioritySubjectSequence(client, maxMessages) ??
-          _latestInboxSequence(inbox, maxMessages);
+      final latestSequence = _latestInboxSequence(inbox, maxMessages);
 
       if (latestSequence != null) {
         _log(
           'FETCH_NOW',
           'Fetching latest $maxMessages from INBOX (${inbox.messagesExists} total)',
         );
-        final fetched = await _fetchLeanMessages(client, latestSequence);
+        final fetched = await _fetchFullTextMessages(client, latestSequence);
 
         for (final message in fetched.messages) {
           final sender =
@@ -285,36 +319,6 @@ class ImapService {
 
     final first = latest - maxMessages + 1;
     return MessageSequence.fromRange(first < 1 ? 1 : first, latest);
-  }
-
-  Future<MessageSequence?> _prioritySubjectSequence(
-    ImapClient client,
-    int maxMessages,
-  ) async {
-    for (final keyword in _prioritySubjectKeywords) {
-      try {
-        final stopwatch = Stopwatch()..start();
-        final result = await _searchForMessages(
-          client,
-          subjectKeyword: keyword,
-        );
-        final sequence = result.matchingSequence;
-        if (sequence == null || sequence.isEmpty) {
-          continue;
-        }
-
-        final ids = sequence.toList().reversed.take(maxMessages).toList();
-        _log(
-          'FETCH_NOW',
-          'Subject "$keyword" matched ${sequence.length}, using ${ids.length} in ${stopwatch.elapsedMilliseconds}ms',
-        );
-        return MessageSequence.fromIds(ids);
-      } catch (e) {
-        _log('FETCH_NOW', 'Subject search failed for "$keyword": $e');
-      }
-    }
-
-    return null;
   }
 
   Future<void> start({
@@ -442,7 +446,7 @@ class ImapService {
     }
 
     await _disconnectClient();
-    final client = ImapClient();
+    final client = _TurboImapClient();
     _client = client;
     _log('RECONNECT', 'Connecting...');
     await _connectClient(client, host, port, username, password);
@@ -471,53 +475,9 @@ class ImapService {
       if (!client.isConnected) return;
 
       final sequence = newMail.toMessageSequence();
-      final envelope = await _fetchEnvelopeMessages(client, sequence);
+      final messages = await _fetchFullTextMessages(client, sequence);
 
       final now = DateTime.now();
-      final bodyIds = <int>[];
-
-      for (final msg in envelope.messages) {
-        final uid = msg.uid ?? 0;
-        if (uid > 0 && _processedUids.contains(uid)) continue;
-
-        final msgDate = msg.decodeDate() ?? DateTime.now();
-        if (now.difference(msgDate).inHours >= 2) continue;
-
-        final sender = msg.from?.first.email ?? '';
-        final recipient = msg.to?.first.email ?? msg.to?.first.toString();
-        final subject = msg.decodeSubject() ?? '';
-
-        final otp = extractOtp(sender: sender, subject: subject, body: '');
-        if (otp != null && !_otpController.isClosed) {
-          if (uid > 0) _processedUids.add(uid);
-          _emitOtp(
-            otp: otp,
-            sender: sender,
-            subject: subject,
-            recipient: recipient,
-            timestamp: msgDate,
-          );
-          continue;
-        }
-
-        if (!_shouldFetchBodyForSubject(subject)) {
-          if (uid > 0) _processedUids.add(uid);
-          _log('FETCH', 'Skipped non-OTP subject: $subject');
-          continue;
-        }
-
-        if (msg.sequenceId != null) {
-          bodyIds.add(msg.sequenceId!);
-        }
-      }
-
-      if (bodyIds.isEmpty) return;
-
-      final messages = await _fetchLeanMessages(
-        client,
-        MessageSequence.fromIds(bodyIds),
-      );
-      final fallbackIds = <int>[];
 
       for (final msg in messages.messages) {
         final uid = msg.uid ?? 0;
@@ -541,78 +501,11 @@ class ImapService {
             recipient: recipient,
             timestamp: msgDate,
           );
-        } else if (msg.sequenceId != null) {
-          fallbackIds.add(msg.sequenceId!);
-        }
-      }
-
-      if (fallbackIds.isEmpty) return;
-
-      final fallback = await _fetchFullTextMessages(
-        client,
-        MessageSequence.fromIds(fallbackIds),
-      );
-
-      for (final msg in fallback.messages) {
-        final uid = msg.uid ?? 0;
-        if (uid > 0 && _processedUids.contains(uid)) continue;
-
-        final msgDate = msg.decodeDate() ?? DateTime.now();
-        if (now.difference(msgDate).inHours >= 2) continue;
-
-        final sender = msg.from?.first.email ?? '';
-        final recipient = msg.to?.first.email ?? msg.to?.first.toString();
-        final subject = msg.decodeSubject() ?? '';
-        final body = _decodeBody(msg);
-
-        final otp = extractOtp(sender: sender, subject: subject, body: body);
-        if (uid > 0) _processedUids.add(uid);
-        if (otp != null && !_otpController.isClosed) {
-          _emitOtp(
-            otp: otp,
-            sender: sender,
-            subject: subject,
-            recipient: recipient,
-            timestamp: msgDate,
-          );
         }
       }
     } catch (e) {
       _log('FETCH', 'Error: $e');
     }
-  }
-
-  Future<FetchImapResult> _fetchEnvelopeMessages(
-    ImapClient client,
-    MessageSequence sequence,
-  ) async {
-    final stopwatch = Stopwatch()..start();
-    _log('FETCH', 'Fast fetch envelope sequence $sequence');
-    final result = await client.fetchMessages(sequence, '(UID ENVELOPE)');
-    _log('FETCH', 'Envelope fetched in ${stopwatch.elapsedMilliseconds}ms');
-    return result;
-  }
-
-  Future<FetchImapResult> _fetchLeanMessages(
-    ImapClient client,
-    MessageSequence sequence,
-  ) async {
-    final stopwatch = Stopwatch()..start();
-    _log('FETCH', 'Fast fetch body part sequence $sequence');
-    final lean = await client.fetchMessages(
-      sequence,
-      '(UID ENVELOPE BODY.PEEK[1])',
-    );
-    _log('FETCH', 'Body part fetched in ${stopwatch.elapsedMilliseconds}ms');
-
-    if (lean.messages.any(
-      (message) => _decodeBody(message).trim().isNotEmpty,
-    )) {
-      return lean;
-    }
-
-    _log('FETCH', 'Lean body empty, fallback text fetch sequence $sequence');
-    return _fetchFullTextMessages(client, sequence);
   }
 
   Future<FetchImapResult> _fetchFullTextMessages(
@@ -626,28 +519,6 @@ class ImapService {
     );
     _log('FETCH', 'Text body fetched in ${stopwatch.elapsedMilliseconds}ms');
     return result;
-  }
-
-  bool _shouldFetchBodyForSubject(String subject) {
-    if (subject.trim().isEmpty) {
-      return true;
-    }
-
-    final normalizedSubject = _normalizeDigits(subject).toLowerCase();
-    if (_prioritySubjectKeywords.any(
-      (keyword) => normalizedSubject.contains(keyword.toLowerCase()),
-    )) {
-      return true;
-    }
-
-    return _rules.any((rule) {
-      if (!rule.enabled || rule.type != FilterType.subject) {
-        return false;
-      }
-
-      final pattern = rule.pattern.trim().toLowerCase();
-      return pattern.isNotEmpty && normalizedSubject.contains(pattern);
-    });
   }
 
   void _emitOtp({
@@ -678,12 +549,15 @@ class ImapService {
   ) async {
     final stopwatch = Stopwatch()..start();
 
-    await client.connectToServer(
-      host,
-      port,
-      isSecure: port == 993,
-      timeout: _connectTimeout,
-    );
+    final connectedViaIpv4 = await _tryConnectViaIpv4(client, host, port);
+    if (!connectedViaIpv4) {
+      await client.connectToServer(
+        host,
+        port,
+        isSecure: port == 993,
+        timeout: _connectTimeout,
+      );
+    }
     _log('CONNECT', 'Socket ready in ${stopwatch.elapsedMilliseconds}ms');
 
     await client.login(username, normalizePassword(password));
@@ -693,6 +567,76 @@ class ImapService {
     _lastExists = inbox.messagesExists;
     _log('CONNECT', 'INBOX selected in ${stopwatch.elapsedMilliseconds}ms');
     return inbox;
+  }
+
+  Future<bool> _tryConnectViaIpv4(
+    ImapClient client,
+    String host,
+    int port,
+  ) async {
+    if (!Platform.isIOS || client is! _TurboImapClient) {
+      return false;
+    }
+
+    List<InternetAddress> addresses;
+    try {
+      final dnsStopwatch = Stopwatch()..start();
+      addresses = await InternetAddress.lookup(
+        host,
+        type: InternetAddressType.IPv4,
+      ).timeout(const Duration(seconds: 2));
+      _log(
+        'DNS',
+        'IPv4 lookup found ${addresses.length} in ${dnsStopwatch.elapsedMilliseconds}ms',
+      );
+    } catch (e) {
+      _log('DNS', 'IPv4 lookup failed, using default connect: $e');
+      return false;
+    }
+
+    for (final address in addresses.take(2)) {
+      Socket? rawSocket;
+      Socket? connectedSocket;
+      try {
+        final socketStopwatch = Stopwatch()..start();
+        rawSocket = await Socket.connect(
+          address,
+          port,
+          timeout: _connectTimeout,
+        );
+
+        final Socket socket;
+        if (port == 993) {
+          socket = await SecureSocket.secure(
+            rawSocket,
+            host: host,
+          ).timeout(_connectTimeout);
+          rawSocket = null;
+        } else {
+          socket = rawSocket;
+          rawSocket = null;
+        }
+        connectedSocket = socket;
+
+        await client.connectSocketAndWait(
+          socket,
+          ConnectionInfo(host, port, isSecure: port == 993),
+          _connectTimeout,
+        );
+        _log(
+          'DNS',
+          'Connected via IPv4 ${address.address} in ${socketStopwatch.elapsedMilliseconds}ms',
+        );
+        return true;
+      } catch (e) {
+        connectedSocket?.destroy();
+        rawSocket?.destroy();
+        _log('DNS', 'IPv4 ${address.address} failed: $e');
+      }
+    }
+
+    _log('DNS', 'All IPv4 attempts failed, using default connect');
+    return false;
   }
 
   Future<bool> _trySelectMailbox(ImapClient client, String mailbox) async {
@@ -803,12 +747,6 @@ class ImapService {
   }) {
     final normalizedSubject = _normalizeDigits(subject);
     final normalizedBody = _normalizeDigits(body);
-
-    for (final rule in _rules) {
-      final otp =
-          rule.extractOtp(normalizedBody) ?? rule.extractOtp(normalizedSubject);
-      if (otp != null) return otp;
-    }
 
     final text = '$normalizedSubject\n$normalizedBody';
 

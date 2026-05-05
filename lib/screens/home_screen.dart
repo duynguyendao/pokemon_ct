@@ -92,12 +92,17 @@ class _HomeScreenState extends State<HomeScreen>
             decoration: const InputDecoration(labelText: 'Nhóm'),
             items: [
               const DropdownMenuItem(value: null, child: Text('Không có nhóm')),
-              ...p.groups.map((g) => DropdownMenuItem(value: g, child: Text(g))),
+              ...p.groups.map(
+                (g) => DropdownMenuItem(value: g, child: Text(g)),
+              ),
             ],
             onChanged: (v) => setS(() => selectedGroup = v),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('Hủy')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx2),
+              child: const Text('Hủy'),
+            ),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx2, selectedGroup ?? '__none__'),
               child: const Text('Chuyển'),
@@ -110,7 +115,8 @@ class _HomeScreenState extends State<HomeScreen>
     final group = result == '__none__' ? null : result;
     for (final id in _selected.toList()) {
       final idx = p.accounts.indexWhere((a) => a.id == id);
-      if (idx >= 0) await p.updateAccount(p.accounts[idx].copyWith(group: group));
+      if (idx >= 0)
+        await p.updateAccount(p.accounts[idx].copyWith(group: group));
     }
     setState(() {
       _selected.clear();
@@ -123,13 +129,19 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.card,
-        title: const Text('Xóa tài khoản', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Xóa tài khoản',
+          style: TextStyle(color: Colors.white),
+        ),
         content: Text(
           'Xóa ${_selected.length} tài khoản đã chọn?',
           style: const TextStyle(color: AppColors.textSecondary),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Hủy'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Xóa'),
@@ -157,17 +169,26 @@ class _HomeScreenState extends State<HomeScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(
-                width: 40, height: 40,
+                width: 40,
+                height: 40,
                 child: CircularProgressIndicator(color: AppColors.accent),
               ),
               const SizedBox(height: 16),
-              const Text('⚡ Chạy 5G Shortcut...', style: TextStyle(color: Colors.white)),
+              const Text(
+                '⚡ Chạy 5G Shortcut...',
+                style: TextStyle(color: Colors.white),
+              ),
               const SizedBox(height: 8),
               Text(
-                account.mode == AccountMode.loginOnly ? 'Login'
-                    : account.mode == AccountMode.lottery ? 'Lottery'
+                account.mode == AccountMode.loginOnly
+                    ? 'Login'
+                    : account.mode == AccountMode.lottery
+                    ? 'Lottery'
                     : 'Lottery Result',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
@@ -185,11 +206,14 @@ class _HomeScreenState extends State<HomeScreen>
       String startUrl = p.loginUrl;
       if (account.mode == AccountMode.lottery && p.lotteryUrl.isNotEmpty) {
         startUrl = p.lotteryUrl;
-      } else if (account.mode == AccountMode.lotteryResult && p.lotteryResultUrl.isNotEmpty) {
+      } else if (account.mode == AccountMode.lotteryResult &&
+          p.lotteryResultUrl.isNotEmpty) {
         startUrl = p.lotteryResultUrl;
       }
 
-      final proxy = p.proxyEnabled ? p.getProxyById(account.proxyId) ?? p.nextProxy : null;
+      final proxy = p.proxyEnabled
+          ? p.getProxyById(account.proxyId) ?? p.nextProxy
+          : null;
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -198,14 +222,18 @@ class _HomeScreenState extends State<HomeScreen>
             proxy: proxy,
             startUrl: startUrl,
             isRunningAll: _runningAll,
-            onStopAll: _runningAll ? () {
-              setState(() => _stopAllRequested = true);
-              Navigator.pop(context);
-            } : null,
-            onSkipCurrent: _runningAll ? () {
-              setState(() => _stopCurrentRequested = true);
-              Navigator.pop(context);
-            } : null,
+            onStopAll: _runningAll
+                ? () {
+                    setState(() => _stopAllRequested = true);
+                    Navigator.pop(context);
+                  }
+                : null,
+            onSkipCurrent: _runningAll
+                ? () {
+                    setState(() => _stopCurrentRequested = true);
+                    Navigator.pop(context);
+                  }
+                : null,
           ),
         ),
       );
@@ -229,14 +257,16 @@ class _HomeScreenState extends State<HomeScreen>
     for (var i = 0; i < list.length; i++) {
       if (_stopAllRequested || !mounted) break;
       if (_stopCurrentRequested) {
-        _currentReport.results.add(StartAllResult(
-          accountEmail: list[i].email,
-          success: false,
-          error: 'Stopped by user',
-          startTime: DateTime.now(),
-          endTime: DateTime.now(),
-          status: 'stopped',
-        ));
+        _currentReport.results.add(
+          StartAllResult(
+            accountEmail: list[i].email,
+            success: false,
+            error: 'Stopped by user',
+            startTime: DateTime.now(),
+            endTime: DateTime.now(),
+            status: 'stopped',
+          ),
+        );
         _stopCurrentRequested = false;
         continue;
       }
@@ -245,22 +275,26 @@ class _HomeScreenState extends State<HomeScreen>
       final startTime = DateTime.now();
       try {
         await _openAccount(list[i], p);
-        _currentReport.results.add(StartAllResult(
-          accountEmail: list[i].email,
-          success: true,
-          startTime: startTime,
-          endTime: DateTime.now(),
-          status: 'success',
-        ));
+        _currentReport.results.add(
+          StartAllResult(
+            accountEmail: list[i].email,
+            success: true,
+            startTime: startTime,
+            endTime: DateTime.now(),
+            status: 'success',
+          ),
+        );
       } catch (e) {
-        _currentReport.results.add(StartAllResult(
-          accountEmail: list[i].email,
-          success: false,
-          error: e.toString(),
-          startTime: startTime,
-          endTime: DateTime.now(),
-          status: 'error',
-        ));
+        _currentReport.results.add(
+          StartAllResult(
+            accountEmail: list[i].email,
+            success: false,
+            error: e.toString(),
+            startTime: startTime,
+            endTime: DateTime.now(),
+            status: 'error',
+          ),
+        );
       }
       if (!mounted) break;
     }
@@ -281,31 +315,53 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.card,
-        title: const Text('Start All Report', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Start All Report',
+          style: TextStyle(color: Colors.white),
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('✅ Success: ${_currentReport.successCount}',
-                  style: const TextStyle(color: AppColors.done, fontWeight: FontWeight.bold)),
-              Text('❌ Error: ${_currentReport.errorCount}',
-                  style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.bold)),
-              Text('⏸️ Stopped: ${_currentReport.stoppedCount}',
-                  style: const TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold)),
+              Text(
+                '✅ Success: ${_currentReport.successCount}',
+                style: const TextStyle(
+                  color: AppColors.done,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '❌ Error: ${_currentReport.errorCount}',
+                style: const TextStyle(
+                  color: AppColors.error,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '⏸️ Stopped: ${_currentReport.stoppedCount}',
+                style: const TextStyle(
+                  color: AppColors.warning,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 12),
               const Divider(color: AppColors.divider),
               const SizedBox(height: 8),
-              ..._currentReport.results.map((r) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  '${r.accountEmail}: ${r.status}${r.error != null ? " (${r.error})" : ""}',
-                  style: TextStyle(
-                    color: r.status == 'success' ? AppColors.done : AppColors.error,
-                    fontSize: 12,
+              ..._currentReport.results.map(
+                (r) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '${r.accountEmail}: ${r.status}${r.error != null ? " (${r.error})" : ""}',
+                    style: TextStyle(
+                      color: r.status == 'success'
+                          ? AppColors.done
+                          : AppColors.error,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
-              )),
+              ),
             ],
           ),
         ),
@@ -322,7 +378,10 @@ class _HomeScreenState extends State<HomeScreen>
             },
             child: const Text('Share CSV'),
           ),
-          ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
@@ -333,18 +392,31 @@ class _HomeScreenState extends State<HomeScreen>
       context: ctx,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.card,
-        title: const Text('Set global mode cho tất cả account', style: TextStyle(color: Colors.white)),
-        content: const Text('Chọn mode sẽ áp dụng cho toàn bộ tài khoản:', style: TextStyle(color: AppColors.textSecondary)),
+        title: const Text(
+          'Set global mode cho tất cả account',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Chọn mode sẽ áp dụng cho toàn bộ tài khoản:',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
         actions: [
-          ...AccountMode.values.map((mode) => ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.secondary),
-            onPressed: () {
-              p.setAllAccountsMode(mode);
-              Navigator.pop(ctx);
-            },
-            child: Text(mode.label),
-          )),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+          ...AccountMode.values.map(
+            (mode) => ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.secondary,
+              ),
+              onPressed: () {
+                p.setAllAccountsMode(mode);
+                Navigator.pop(ctx);
+              },
+              child: Text(mode.label),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Hủy'),
+          ),
         ],
       ),
     );
@@ -361,7 +433,10 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (_) => StatefulBuilder(
         builder: (ctx2, setS) => AlertDialog(
           backgroundColor: AppColors.card,
-          title: const Text('Chỉnh sửa tài khoản', style: TextStyle(color: Colors.white)),
+          title: const Text(
+            'Chỉnh sửa tài khoản',
+            style: TextStyle(color: Colors.white),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -384,39 +459,60 @@ class _HomeScreenState extends State<HomeScreen>
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(labelText: 'Nhóm'),
                   items: [
-                    const DropdownMenuItem(value: null, child: Text('Không có nhóm')),
-                    ...p.groups.map((g) => DropdownMenuItem(value: g, child: Text(g))),
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('Không có nhóm'),
+                    ),
+                    ...p.groups.map(
+                      (g) => DropdownMenuItem(value: g, child: Text(g)),
+                    ),
                   ],
                   onChanged: (v) => setS(() => selectedGroup = v),
                 ),
                 const SizedBox(height: 12),
                 const Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('Chế độ mở', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  child: Text(
+                    'Chế độ mở',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 4),
-                ...AccountMode.values.map((mode) => RadioListTile<AccountMode>(
-                  value: mode,
-                  groupValue: selectedMode,
-                  onChanged: (v) => setS(() => selectedMode = v!),
-                  title: Text(mode.label, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                  activeColor: AppColors.primary,
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                )),
+                ...AccountMode.values.map(
+                  (mode) => RadioListTile<AccountMode>(
+                    value: mode,
+                    groupValue: selectedMode,
+                    onChanged: (v) => setS(() => selectedMode = v!),
+                    title: Text(
+                      mode.label,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    ),
+                    activeColor: AppColors.primary,
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('Hủy')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx2),
+              child: const Text('Hủy'),
+            ),
             ElevatedButton(
               onPressed: () {
-                p.updateAccount(account.copyWith(
-                  email: emailCtrl.text.trim(),
-                  password: passCtrl.text.trim(),
-                  group: selectedGroup,
-                  mode: selectedMode,
-                ));
+                p.updateAccount(
+                  account.copyWith(
+                    email: emailCtrl.text.trim(),
+                    password: passCtrl.text.trim(),
+                    group: selectedGroup,
+                    mode: selectedMode,
+                  ),
+                );
                 Navigator.pop(ctx2);
               },
               child: const Text('Lưu'),
@@ -441,8 +537,14 @@ class _HomeScreenState extends State<HomeScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Quản lý nhóm',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                'Quản lý nhóm',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -470,16 +572,18 @@ class _HomeScreenState extends State<HomeScreen>
                 ],
               ),
               const SizedBox(height: 12),
-              ...p.groups.map((g) => ListTile(
-                    title: Text(g, style: const TextStyle(color: Colors.white)),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete, color: AppColors.error),
-                      onPressed: () {
-                        p.deleteGroup(g);
-                        setS(() {});
-                      },
-                    ),
-                  )),
+              ...p.groups.map(
+                (g) => ListTile(
+                  title: Text(g, style: const TextStyle(color: Colors.white)),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete, color: AppColors.error),
+                    onPressed: () {
+                      p.deleteGroup(g);
+                      setS(() {});
+                    },
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -501,35 +605,59 @@ class _HomeScreenState extends State<HomeScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Cài đặt',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            const Text(
+              'Cài đặt',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 16),
             SwitchListTile(
               value: p.proxyEnabled,
               onChanged: p.setProxyEnabled,
-              title: const Text('Bật Proxy', style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Tự động dùng proxy khi mở tài khoản',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              title: const Text(
+                'Bật Proxy',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: const Text(
+                'Tự động dùng proxy khi mở tài khoản',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
               activeThumbColor: AppColors.secondary,
             ),
             SwitchListTile(
               value: p.fakeBrowser,
               onChanged: p.setFakeBrowser,
-              title: const Text('Giả mạo trình duyệt', style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Inject anti-fingerprint JavaScript',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              title: const Text(
+                'Giả mạo trình duyệt',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: const Text(
+                'Inject anti-fingerprint JavaScript',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
               activeThumbColor: AppColors.secondary,
             ),
             ListTile(
-              title: const Text('Bật 5G/WiFi Shortcut', style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Gọi Shortcut: Tắt 5G → Bật 5G → Open App',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              title: const Text(
+                'Bật 5G/WiFi Shortcut',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: const Text(
+                'Gọi Shortcut: Tắt 5G → Bật 5G → Open App',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
               trailing: ElevatedButton.icon(
                 icon: const Icon(Icons.play_arrow, size: 16),
                 label: const Text('Chạy', style: TextStyle(fontSize: 11)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accent,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   minimumSize: Size.zero,
                 ),
                 onPressed: () async {
@@ -552,7 +680,10 @@ class _HomeScreenState extends State<HomeScreen>
               style: const TextStyle(color: Colors.white),
               decoration: const InputDecoration(
                 labelText: 'Mật khẩu mặc định',
-                suffixIcon: Icon(Icons.lock_outline, color: AppColors.textSecondary),
+                suffixIcon: Icon(
+                  Icons.lock_outline,
+                  color: AppColors.textSecondary,
+                ),
               ),
               onChanged: p.setDefaultPassword,
             ),
@@ -606,10 +737,22 @@ class _HomeScreenState extends State<HomeScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text('PokemonCT',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 0.5)),
-                      Text('Account Manager',
-                          style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                      Text(
+                        'PokemonCT',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      Text(
+                        'Account Manager',
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -621,14 +764,20 @@ class _HomeScreenState extends State<HomeScreen>
               child: Center(
                 child: Text(
                   '${_runAllIndex + 1}/${_runAllList.length}',
-                  style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                    color: AppColors.accent,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                 ),
               ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.warning),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.warning,
+                ),
                 onPressed: () => setState(() => _stopCurrentRequested = true),
                 icon: const Icon(Icons.skip_next, size: 18),
                 label: const Text('Skip', style: TextStyle(fontSize: 12)),
@@ -637,15 +786,22 @@ class _HomeScreenState extends State<HomeScreen>
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                ),
                 onPressed: () => setState(() => _stopAllRequested = true),
                 icon: const Icon(Icons.stop, size: 18),
-                label: const Text('Stop', style: TextStyle(fontSize: 12)),
+                label: const Text('Stop All', style: TextStyle(fontSize: 12)),
               ),
             ),
           ] else if (_batchMode) ...[
-            Text('${_selected.length} đã chọn',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+            Text(
+              '${_selected.length} đã chọn',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+              ),
+            ),
             IconButton(
               icon: const Icon(Icons.drive_file_move_outlined),
               tooltip: 'Chuyển nhóm',
@@ -664,7 +820,10 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ] else ...[
             IconButton(
-              icon: const Icon(Icons.play_circle_outline, color: AppColors.done),
+              icon: const Icon(
+                Icons.play_circle_outline,
+                color: AppColors.done,
+              ),
               tooltip: 'Start All (chạy tuần tự tất cả TODO)',
               onPressed: () => _runAllAccounts(p),
             ),
@@ -701,13 +860,37 @@ class _HomeScreenState extends State<HomeScreen>
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
               children: [
-                Expanded(child: SummaryCard(label: '⏳ Chờ', value: p.todoCount, color: AppColors.todo)),
+                Expanded(
+                  child: SummaryCard(
+                    label: '⏳ Chờ',
+                    value: p.todoCount,
+                    color: AppColors.todo,
+                  ),
+                ),
                 const SizedBox(width: 10),
-                Expanded(child: SummaryCard(label: '✅ Xong', value: p.doneCount, color: AppColors.done)),
+                Expanded(
+                  child: SummaryCard(
+                    label: '✅ Xong',
+                    value: p.doneCount,
+                    color: AppColors.done,
+                  ),
+                ),
                 const SizedBox(width: 10),
-                Expanded(child: SummaryCard(label: '📊 Tổng', value: p.accounts.length, color: AppColors.primary)),
+                Expanded(
+                  child: SummaryCard(
+                    label: '📊 Tổng',
+                    value: p.accounts.length,
+                    color: AppColors.primary,
+                  ),
+                ),
                 const SizedBox(width: 10),
-                Expanded(child: SummaryCard(label: '🔐 Proxy', value: p.proxies.length, color: AppColors.accent)),
+                Expanded(
+                  child: SummaryCard(
+                    label: '🔐 Proxy',
+                    value: p.proxies.length,
+                    color: AppColors.accent,
+                  ),
+                ),
               ],
             ),
           ),
@@ -722,7 +905,13 @@ class _HomeScreenState extends State<HomeScreen>
                   Padding(
                     padding: const EdgeInsets.only(right: 6),
                     child: ChoiceChip(
-                      label: Text(s == 'all' ? 'Tất cả' : s == 'todo' ? 'Chờ' : 'Xong'),
+                      label: Text(
+                        s == 'all'
+                            ? 'Tất cả'
+                            : s == 'todo'
+                            ? 'Chờ'
+                            : 'Xong',
+                      ),
                       selected: _statusFilter == s,
                       onSelected: (_) => setState(() => _statusFilter = s),
                     ),
@@ -735,14 +924,16 @@ class _HomeScreenState extends State<HomeScreen>
                     onSelected: (_) => setState(() => _groupFilter = null),
                   ),
                   const SizedBox(width: 6),
-                  ...p.groups.map((g) => Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text(g),
-                          selected: _groupFilter == g,
-                          onSelected: (_) => setState(() => _groupFilter = g),
-                        ),
-                      )),
+                  ...p.groups.map(
+                    (g) => Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(g),
+                        selected: _groupFilter == g,
+                        onSelected: (_) => setState(() => _groupFilter = g),
+                      ),
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -757,11 +948,19 @@ class _HomeScreenState extends State<HomeScreen>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.catching_pokemon, size: 64, color: AppColors.textSecondary),
+                        const Icon(
+                          Icons.catching_pokemon,
+                          size: 64,
+                          color: AppColors.textSecondary,
+                        ),
                         const SizedBox(height: 12),
                         Text(
-                          p.accounts.isEmpty ? 'Chưa có tài khoản nào' : 'Không tìm thấy tài khoản',
-                          style: const TextStyle(color: AppColors.textSecondary),
+                          p.accounts.isEmpty
+                              ? 'Chưa có tài khoản nào'
+                              : 'Không tìm thấy tài khoản',
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                          ),
                         ),
                       ],
                     ),
@@ -792,7 +991,8 @@ class _HomeScreenState extends State<HomeScreen>
                         onToggleStatus: () => p.toggleStatus(account.id),
                         onEdit: () => _showEditDialog(context, account, p),
                         onDelete: () => p.deleteAccount(account.id),
-                        onModeChange: (mode) => p.updateAccount(account.copyWith(mode: mode)),
+                        onModeChange: (mode) =>
+                            p.updateAccount(account.copyWith(mode: mode)),
                       );
                     },
                   ),

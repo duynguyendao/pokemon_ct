@@ -80,7 +80,6 @@ class AppProvider extends ChangeNotifier {
     _proxyEnabled = await _storage.loadProxyEnabled();
     _fakeBrowser = await _storage.loadFakeBrowser();
     _loaded = true;
-    _imap.setRules(_filterRules);
     _setupOtpStream();
     notifyListeners();
   }
