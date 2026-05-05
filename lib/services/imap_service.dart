@@ -24,12 +24,31 @@ class ImapEmailResult {
   });
 }
 
+class _IdleNewMail {
+  final int oldCount;
+  final int newCount;
+
+  const _IdleNewMail(this.oldCount, this.newCount);
+
+  bool get hasNewMail => newCount > oldCount;
+
+  MessageSequence toMessageSequence() {
+    final first = oldCount + 1;
+    final last = newCount;
+    return first == last
+        ? MessageSequence.fromId(last)
+        : MessageSequence.fromRange(first, last);
+  }
+}
+
 class ImapService {
-  late ImapClient _client;
-  ImapClient? _idleClient;
+  ImapClient? _client;
   bool _isRunning = false;
   bool _isIdleRunning = false;
-  Timer? _heartbeatTimer;
+  String? _host;
+  int? _port;
+  String? _username;
+  String? _password;
 
   final Set<int> _processedUids = {};
   List<FilterRule> _rules = [];
@@ -267,16 +286,18 @@ class ImapService {
     if (_isRunning) return;
 
     _isRunning = true;
+    _host = host;
+    _port = port;
+    _username = username;
+    _password = password;
     _log('START', 'Starting IMAP...');
 
     try {
-      _client = ImapClient();
-      await _connectClient(_client, host, port, username, password);
+      await _ensureConnected();
 
       _log('START', 'Connected OK');
 
-      _startHeartbeat();
-      _startIdleLoop(host, port, username, password);
+      _startIdleLoop();
     } catch (e) {
       _isRunning = false;
       _log('START', 'Failed: $e');
@@ -284,53 +305,31 @@ class ImapService {
     }
   }
 
-  void _startHeartbeat() {
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(Duration(minutes: 4), (_) async {
-      if (!_isRunning || !_client.isConnected) return;
-      try {
-        await _client.noop();
-      } catch (e) {
-        _log('HEARTBEAT', 'Error: $e');
-      }
-    });
-  }
-
-  void _startIdleLoop(String host, int port, String username, String password) {
+  void _startIdleLoop() {
     _isIdleRunning = true;
-    unawaited(_runIdleLoop(host, port, username, password));
+    unawaited(_runIdleLoop());
   }
 
-  Future<void> _runIdleLoop(
-    String host,
-    int port,
-    String username,
-    String password,
-  ) async {
+  Future<void> _runIdleLoop() async {
     while (_isRunning && _isIdleRunning) {
       try {
-        var idleClient = _idleClient;
-        if (idleClient == null || !idleClient.isConnected) {
-          idleClient = ImapClient();
-          _idleClient = idleClient;
-          await _connectClient(idleClient, host, port, username, password);
-          _log('IDLE', 'Connected');
-        }
+        final client = await _ensureConnected();
 
         _log('IDLE', 'Waiting for mail...');
-        final hasNewMail = await _waitForNewMail(idleClient);
+        final newMail = await _waitForNewMail(client);
 
         if (!_isRunning || !_isIdleRunning) break;
 
-        if (hasNewMail) {
-          _log('IDLE', 'New mail detected');
-          await _fetchNew();
+        if (newMail?.hasNewMail == true) {
+          _log(
+            'IDLE',
+            'New mail detected ${newMail!.oldCount}->${newMail.newCount}',
+          );
+          await _fetchNew(client, newMail);
         }
       } catch (e) {
         _log('IDLE', 'Error: $e');
-        try {
-          await _idleClient?.disconnect();
-        } catch (_) {}
+        await _disconnectClient();
 
         if (_isRunning && _isIdleRunning) {
           await Future.delayed(Duration(seconds: 5));
@@ -339,19 +338,21 @@ class ImapService {
     }
   }
 
-  Future<bool> _waitForNewMail(ImapClient idleClient) async {
-    final newMail = Completer<void>();
+  Future<_IdleNewMail?> _waitForNewMail(ImapClient idleClient) async {
+    final newMail = Completer<_IdleNewMail>();
     final subscription = idleClient.eventBus
         .on<ImapMessagesExistEvent>()
-        .listen((_) {
+        .listen((event) {
           if (!newMail.isCompleted) {
-            newMail.complete();
+            newMail.complete(
+              _IdleNewMail(event.oldMessagesExists, event.newMessagesExists),
+            );
           }
         });
 
     try {
       await idleClient.idleStart();
-      await Future.any([newMail.future, Future.delayed(Duration(minutes: 9))]);
+      await Future.any([newMail.future, Future.delayed(Duration(minutes: 4))]);
     } finally {
       await subscription.cancel();
       try {
@@ -359,31 +360,66 @@ class ImapService {
       } catch (_) {}
     }
 
-    return newMail.isCompleted;
+    if (newMail.isCompleted) {
+      return await newMail.future;
+    }
+
+    try {
+      await idleClient.noop();
+      _log('HEARTBEAT', 'NOOP OK');
+    } catch (e) {
+      _log('HEARTBEAT', 'NOOP failed: $e');
+      rethrow;
+    }
+
+    return null;
   }
 
-  Future<void> _fetchNew() async {
+  Future<ImapClient> _ensureConnected() async {
+    final existing = _client;
+    if (existing != null && existing.isConnected) {
+      return existing;
+    }
+
+    final host = _host;
+    final port = _port;
+    final username = _username;
+    final password = _password;
+
+    if (host == null || port == null || username == null || password == null) {
+      throw StateError('IMAP config is not available for reconnect.');
+    }
+
+    await _disconnectClient();
+    final client = ImapClient();
+    _client = client;
+    _log('RECONNECT', 'Connecting...');
+    await _connectClient(client, host, port, username, password);
+    _log('RECONNECT', 'Connected OK');
+    return client;
+  }
+
+  Future<void> _disconnectClient() async {
+    final client = _client;
+    _client = null;
+    if (client == null) {
+      return;
+    }
+
     try {
-      if (!_client.isConnected) return;
+      await client.logout();
+    } catch (_) {}
+    try {
+      await client.disconnect();
+    } catch (_) {}
+  }
 
-      await _trySelectMailbox(_client, 'INBOX');
-      final searchResult = await _searchForMessages(
-        _client,
-        from: DateTime.now().subtract(const Duration(hours: 2)),
-      );
-      final recentMessages = searchResult.matchingSequence;
+  Future<void> _fetchNew(ImapClient client, _IdleNewMail newMail) async {
+    try {
+      if (!client.isConnected) return;
 
-      if (recentMessages == null || recentMessages.isEmpty) {
-        return;
-      }
-
-      final recentIds = recentMessages.toList().reversed.take(30).toList();
-      _log('FETCH', 'Found ${recentIds.length} recent email(s)');
-
-      final messages = await _client.fetchMessages(
-        MessageSequence.fromIds(recentIds),
-        '(UID BODY.PEEK[])',
-      );
+      final sequence = newMail.toMessageSequence();
+      final messages = await _fetchLeanMessages(client, sequence);
 
       final now = DateTime.now();
 
@@ -417,6 +453,26 @@ class ImapService {
     } catch (e) {
       _log('FETCH', 'Error: $e');
     }
+  }
+
+  Future<FetchImapResult> _fetchLeanMessages(
+    ImapClient client,
+    MessageSequence sequence,
+  ) async {
+    _log('FETCH', 'Fast fetch sequence $sequence');
+    final lean = await client.fetchMessages(
+      sequence,
+      '(UID ENVELOPE BODY.PEEK[TEXT])',
+    );
+
+    if (lean.messages.any(
+      (message) => _decodeBody(message).trim().isNotEmpty,
+    )) {
+      return lean;
+    }
+
+    _log('FETCH', 'Lean body empty, fallback full fetch sequence $sequence');
+    return client.fetchMessages(sequence, '(UID BODY.PEEK[])');
   }
 
   Future<void> _connectClient(
@@ -495,7 +551,11 @@ class ImapService {
   }
 
   String _decodeBody(MimeMessage message) {
-    return message.decodeTextPlainPart() ?? message.decodeTextHtmlPart() ?? '';
+    final body =
+        message.decodeTextPlainPart() ??
+        message.decodeTextHtmlPart() ??
+        message.decodeContentText();
+    return body ?? '';
   }
 
   String _preview(String body) {
@@ -567,15 +627,11 @@ class ImapService {
   Future<void> stop() async {
     _isRunning = false;
     _isIdleRunning = false;
-    _heartbeatTimer?.cancel();
-
-    try {
-      await _client.logout();
-    } catch (_) {}
-
-    try {
-      await _idleClient?.disconnect();
-    } catch (_) {}
+    await _disconnectClient();
+    _host = null;
+    _port = null;
+    _username = null;
+    _password = null;
 
     _log('STOP', 'Stopped');
   }
