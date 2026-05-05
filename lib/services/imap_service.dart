@@ -85,81 +85,81 @@ class ImapService {
 
     try {
       await _connectClient(client, host, port, username, password);
-      await _selectSearchMailbox(client);
+      final results = <ImapEmailResult>[];
 
-      final keyword = subjectKeyword.isNotEmpty ? subjectKeyword : bodyKeyword;
-      var searchResult = await _searchByDateAndKeyword(
-        client,
-        keyword: keyword,
-        from: from,
-        to: to,
-      );
-      var sequence = searchResult.matchingSequence;
+      for (final mailbox in const ['INBOX']) {
+        if (results.length >= maxMessages ||
+            !await _trySelectMailbox(client, mailbox)) {
+          break;
+        }
 
-      if ((sequence == null || sequence.isEmpty) && keyword.isNotEmpty) {
-        _log(
-          'SEARCH',
-          'Keyword search empty, falling back to date-only search',
-        );
-        searchResult = await _searchByDateAndKeyword(
+        final searchResult = await _searchForMessages(
           client,
+          subjectKeyword: subjectKeyword,
+          bodyKeyword: bodyKeyword,
           from: from,
           to: to,
         );
-        sequence = searchResult.matchingSequence;
-      }
+        final sequence = searchResult.matchingSequence;
 
-      if (sequence == null || sequence.isEmpty) {
-        _log('SEARCH', 'No messages found on server');
-        return [];
-      }
+        if (sequence == null || sequence.isEmpty) {
+          _log('SEARCH', 'No messages found in $mailbox');
+          continue;
+        }
 
-      final ids = sequence.toList().reversed.take(80).toList();
-      _log(
-        'SEARCH',
-        'Server matched ${sequence.length}, fetching ${ids.length}',
-      );
+        final fetchLimit = _fetchLimitFor(maxMessages - results.length);
+        final ids = sequence.toList().reversed.take(fetchLimit).toList();
+        _log(
+          'SEARCH',
+          '$mailbox matched ${sequence.length}, fetching ${ids.length}',
+        );
 
-      final results = <ImapEmailResult>[];
-      const batchSize = 20;
+        const batchSize = 20;
 
-      for (
-        var i = 0;
-        i < ids.length && results.length < maxMessages;
-        i += batchSize
-      ) {
-        final end = (i + batchSize < ids.length) ? i + batchSize : ids.length;
-        final batch = MessageSequence.fromIds(ids.sublist(i, end));
-        final fetched = await client.fetchMessages(batch, '(BODY.PEEK[])');
+        for (
+          var i = 0;
+          i < ids.length && results.length < maxMessages;
+          i += batchSize
+        ) {
+          final end = (i + batchSize < ids.length) ? i + batchSize : ids.length;
+          final batch = MessageSequence.fromIds(ids.sublist(i, end));
+          final fetched = await client.fetchMessages(batch, '(BODY.PEEK[])');
 
-        for (final message in fetched.messages) {
-          final subject = message.decodeSubject() ?? '(No Subject)';
-          final sender =
-              message.from?.first.email ?? message.from?.first.toString() ?? '';
-          final body = _decodeBody(message);
-          final date = message.decodeDate() ?? DateTime.now();
+          for (final message in fetched.messages) {
+            final subject = message.decodeSubject() ?? '(No Subject)';
+            final sender =
+                message.from?.first.email ??
+                message.from?.first.toString() ??
+                '';
+            final body = _decodeBody(message);
+            final date = message.decodeDate() ?? DateTime.now();
 
-          if (!_messageMatches(
-            subject: subject,
-            body: body,
-            subjectKeyword: subjectKeyword,
-            bodyKeyword: bodyKeyword,
-          )) {
-            continue;
-          }
-
-          results.add(
-            ImapEmailResult(
+            if (!_messageMatches(
               subject: subject,
-              sender: sender,
-              body: _preview(body),
-              date: date,
-              otpFound: _extractOtp(sender, subject, body),
-            ),
-          );
+              body: body,
+              subjectKeyword: subjectKeyword,
+              bodyKeyword: bodyKeyword,
+            )) {
+              continue;
+            }
 
-          if (results.length >= maxMessages) {
-            break;
+            results.add(
+              ImapEmailResult(
+                subject: subject,
+                sender: sender,
+                body: _preview(body),
+                date: date,
+                otpFound: extractOtp(
+                  sender: sender,
+                  subject: subject,
+                  body: body,
+                ),
+              ),
+            );
+
+            if (results.length >= maxMessages) {
+              break;
+            }
           }
         }
       }
@@ -181,62 +181,68 @@ class ImapService {
     required int port,
     required String username,
     required String password,
-    int maxMessages = 50,
-    Duration maxAge = const Duration(minutes: 10),
+    int maxMessages = 80,
+    Duration maxAge = const Duration(hours: 2),
   }) async {
     final client = ImapClient();
 
     try {
       await _connectClient(client, host, port, username, password);
-      await _selectSearchMailbox(client);
 
-      final since = DateTime.now().subtract(maxAge);
-      final searchResult = await _searchByDateAndKeyword(client, from: since);
-      final sequence = searchResult.matchingSequence;
-
-      if (sequence == null || sequence.isEmpty) {
-        return [];
-      }
-
-      final ids = sequence.toList().reversed.take(maxMessages).toList();
-      final fetched = await client.fetchMessages(
-        MessageSequence.fromIds(ids),
-        '(BODY.PEEK[])',
-      );
       final otps = <OtpEntry>[];
-
-      for (final message in fetched.messages) {
-        final sender =
-            message.from?.first.email ?? message.from?.first.toString() ?? '';
-        final recipient =
-            message.to?.first.email ?? message.to?.first.toString();
-        final subject = message.decodeSubject() ?? '';
-        final body = _decodeBody(message);
-        final date = message.decodeDate() ?? DateTime.now();
-
-        if (DateTime.now().difference(date) > maxAge) {
-          continue;
+      for (final mailbox in const ['INBOX']) {
+        if (otps.isNotEmpty || !await _trySelectMailbox(client, mailbox)) {
+          break;
         }
-        if (!_matchesFilter(sender, subject, recipient ?? '', body)) {
+
+        final since = DateTime.now().subtract(maxAge);
+        final searchResult = await _searchForMessages(client, from: since);
+        final sequence = searchResult.matchingSequence;
+
+        if (sequence == null || sequence.isEmpty) {
           continue;
         }
 
-        final otp = _extractOtp(sender, subject, body);
-        if (otp == null) {
-          continue;
-        }
-
-        final entry = OtpEntry(
-          code: otp,
-          sender: sender,
-          subject: subject,
-          recipient: recipient,
-          timestamp: date,
+        final ids = sequence.toList().reversed.take(maxMessages).toList();
+        _log(
+          'FETCH_NOW',
+          '$mailbox matched ${sequence.length}, fetching ${ids.length}',
         );
-        otps.add(entry);
+        final fetched = await client.fetchMessages(
+          MessageSequence.fromIds(ids),
+          '(BODY.PEEK[])',
+        );
 
-        if (!_otpController.isClosed) {
-          _otpController.add(entry);
+        for (final message in fetched.messages) {
+          final sender =
+              message.from?.first.email ?? message.from?.first.toString() ?? '';
+          final recipient =
+              message.to?.first.email ?? message.to?.first.toString();
+          final subject = message.decodeSubject() ?? '';
+          final body = _decodeBody(message);
+          final date = message.decodeDate() ?? DateTime.now();
+
+          if (DateTime.now().difference(date) > maxAge) {
+            continue;
+          }
+
+          final otp = extractOtp(sender: sender, subject: subject, body: body);
+          if (otp == null) {
+            continue;
+          }
+
+          final entry = OtpEntry(
+            code: otp,
+            sender: sender,
+            subject: subject,
+            recipient: recipient,
+            timestamp: date,
+          );
+          otps.add(entry);
+
+          if (!_otpController.isClosed) {
+            _otpController.add(entry);
+          }
         }
       }
 
@@ -360,20 +366,23 @@ class ImapService {
     try {
       if (!_client.isConnected) return;
 
-      final searchResult = await _client.uidSearchMessages(
-        searchCriteria: 'UNSEEN',
+      await _trySelectMailbox(_client, 'INBOX');
+      final searchResult = await _searchForMessages(
+        _client,
+        from: DateTime.now().subtract(const Duration(hours: 2)),
       );
-      final unreadMessages = searchResult.matchingSequence;
+      final recentMessages = searchResult.matchingSequence;
 
-      if (unreadMessages == null || unreadMessages.isEmpty) {
+      if (recentMessages == null || recentMessages.isEmpty) {
         return;
       }
 
-      _log('FETCH', 'Found ${unreadMessages.length} unseen email(s)');
+      final recentIds = recentMessages.toList().reversed.take(30).toList();
+      _log('FETCH', 'Found ${recentIds.length} recent email(s)');
 
-      final messages = await _client.uidFetchMessages(
-        unreadMessages,
-        '(UID FLAGS BODY.PEEK[])',
+      final messages = await _client.fetchMessages(
+        MessageSequence.fromIds(recentIds),
+        '(UID BODY.PEEK[])',
       );
 
       final now = DateTime.now();
@@ -384,18 +393,14 @@ class ImapService {
 
         // Check age
         final msgDate = msg.decodeDate() ?? DateTime.now();
-        if (now.difference(msgDate).inMinutes > 2) continue;
+        if (now.difference(msgDate).inHours >= 2) continue;
 
         final sender = msg.from?.first.email ?? '';
         final recipient = msg.to?.first.email ?? msg.to?.first.toString();
         final subject = msg.decodeSubject() ?? '';
         final body = _decodeBody(msg);
 
-        // Match filter
-        if (!_matchesFilter(sender, subject, recipient ?? '', body)) continue;
-
-        // Extract OTP
-        final otp = _extractOtp(sender, subject, body);
+        final otp = extractOtp(sender: sender, subject: subject, body: body);
         if (otp != null && !_otpController.isClosed) {
           _log('FETCH', 'OTP: $otp');
           _otpController.add(
@@ -426,31 +431,38 @@ class ImapService {
     await client.selectInbox();
   }
 
-  Future<void> _selectSearchMailbox(ImapClient client) async {
-    for (final folder in const ['[Gmail]/All Mail', 'INBOX']) {
-      try {
-        await client.selectMailboxByPath(folder);
-        _log('MAILBOX', 'Selected $folder');
-        return;
-      } catch (_) {}
+  Future<bool> _trySelectMailbox(ImapClient client, String mailbox) async {
+    try {
+      await client.selectMailboxByPath(mailbox);
+      _log('MAILBOX', 'Selected $mailbox');
+      return true;
+    } catch (e) {
+      _log('MAILBOX', 'Cannot select $mailbox: $e');
+      return false;
     }
-
-    await client.selectInbox();
-    _log('MAILBOX', 'Selected INBOX fallback');
   }
 
-  Future<SearchImapResult> _searchByDateAndKeyword(
+  Future<SearchImapResult> _searchForMessages(
     ImapClient client, {
-    String keyword = '',
+    String subjectKeyword = '',
+    String bodyKeyword = '',
     DateTime? from,
     DateTime? to,
   }) {
-    final builder = SearchQueryBuilder.from(
-      keyword,
-      SearchQueryType.allTextHeaders,
-      since: from,
-      before: to?.add(const Duration(days: 1)),
-    );
+    final builder = SearchQueryBuilder.from('', SearchQueryType.subject);
+    if (subjectKeyword.trim().isNotEmpty) {
+      builder.add(SearchTermSubject(subjectKeyword.trim()));
+    }
+    if (bodyKeyword.trim().isNotEmpty) {
+      builder.add(SearchTermBody(bodyKeyword.trim()));
+    }
+    if (from != null) {
+      builder.add(SearchTermSince(from));
+    }
+    if (to != null) {
+      builder.add(SearchTermBefore(to.add(const Duration(days: 1))));
+    }
+
     final criteria = builder.toString();
     _log('SEARCH', 'Criteria: ${criteria.isEmpty ? 'ALL' : criteria}');
 
@@ -491,53 +503,65 @@ class ImapService {
     return collapsed.length > 800 ? collapsed.substring(0, 800) : collapsed;
   }
 
-  bool _matchesFilter(
-    String sender,
-    String subject,
-    String recipient,
-    String body,
-  ) {
-    if (_rules.isEmpty) return true;
-
-    for (final rule in _rules) {
-      var matches = false;
-      final pattern = rule.pattern.toLowerCase();
-
-      switch (rule.type) {
-        case FilterType.sender:
-          matches = sender.toLowerCase().contains(pattern);
-          break;
-        case FilterType.subject:
-          matches = subject.toLowerCase().contains(pattern);
-          break;
-        case FilterType.recipient:
-          matches = recipient.toLowerCase().contains(pattern);
-          break;
-        case FilterType.body:
-          matches = body.toLowerCase().contains(pattern);
-          break;
-        case FilterType.regex:
-          try {
-            final regex = RegExp(rule.pattern, caseSensitive: false);
-            matches = regex.hasMatch('$sender\n$recipient\n$subject\n$body');
-          } catch (_) {}
-          break;
-      }
-
-      if (matches) return true;
+  int _fetchLimitFor(int desiredResults) {
+    if (desiredResults <= 0) {
+      return 0;
     }
-
-    return false;
+    final limit = desiredResults * 8;
+    if (limit < 20) {
+      return 20;
+    }
+    return limit > 60 ? 60 : limit;
   }
 
-  String? _extractOtp(String sender, String subject, String body) {
+  String? extractOtp({
+    required String sender,
+    required String subject,
+    required String body,
+  }) {
+    final normalizedSubject = _normalizeDigits(subject);
+    final normalizedBody = _normalizeDigits(body);
+
     for (final rule in _rules) {
-      final otp = rule.extractOtp(body) ?? rule.extractOtp(subject);
+      final otp =
+          rule.extractOtp(normalizedBody) ?? rule.extractOtp(normalizedSubject);
       if (otp != null) return otp;
     }
 
-    final match = RegExp(r'\b\d{6}\b').firstMatch('$subject\n$body');
-    return match?.group(0);
+    final text = '$normalizedSubject\n$normalizedBody';
+
+    final compactMatch = RegExp(r'(^|[^\d])(\d{6})(?!\d)').firstMatch(text);
+    if (compactMatch != null) {
+      return compactMatch.group(2);
+    }
+
+    final spacedMatch = RegExp(
+      r'(^|[^\d])((\d[\s\-_.]*){6})(?!\d)',
+    ).firstMatch(text);
+    if (spacedMatch != null) {
+      final digits = RegExp(r'\d')
+          .allMatches(spacedMatch.group(2) ?? '')
+          .map((match) => match.group(0)!)
+          .join();
+      if (digits.length == 6) {
+        return digits;
+      }
+    }
+
+    return null;
+  }
+
+  String _normalizeDigits(String text) {
+    const fullWidthZero = 0xff10;
+    final buffer = StringBuffer();
+    for (final rune in text.runes) {
+      if (rune >= fullWidthZero && rune <= fullWidthZero + 9) {
+        buffer.writeCharCode(0x30 + rune - fullWidthZero);
+      } else {
+        buffer.writeCharCode(rune);
+      }
+    }
+    return buffer.toString();
   }
 
   Future<void> stop() async {
