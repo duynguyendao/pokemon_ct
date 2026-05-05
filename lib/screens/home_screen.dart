@@ -598,142 +598,172 @@ class _HomeScreenState extends State<HomeScreen>
     showModalBottomSheet(
       context: ctx,
       backgroundColor: AppColors.surfaceVariant,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Cài đặt',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            SwitchListTile(
-              value: p.proxyEnabled,
-              onChanged: p.setProxyEnabled,
-              title: const Text(
-                'Bật Proxy',
-                style: TextStyle(color: Colors.white),
-              ),
-              subtitle: const Text(
-                'Tự động dùng proxy khi mở tài khoản',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              ),
-              activeThumbColor: AppColors.secondary,
-            ),
-            SwitchListTile(
-              value: p.fakeBrowser,
-              onChanged: p.setFakeBrowser,
-              title: const Text(
-                'Giả mạo trình duyệt',
-                style: TextStyle(color: Colors.white),
-              ),
-              subtitle: const Text(
-                'Inject anti-fingerprint JavaScript',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              ),
-              activeThumbColor: AppColors.secondary,
-            ),
-            SwitchListTile(
-              value: p.incognitoMode,
-              onChanged: p.setIncognitoMode,
-              title: const Text(
-                'Chế độ ẩn danh',
-                style: TextStyle(color: Colors.white),
-              ),
-              subtitle: const Text(
-                'Xóa cookies/cache mỗi lần mở tài khoản',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              ),
-              activeThumbColor: AppColors.secondary,
-            ),
-            SwitchListTile(
-              value: p.shortcut5gEnabled,
-              onChanged: p.setShortcut5gEnabled,
-              title: const Text(
-                'Shortcut 5G/WiFi',
-                style: TextStyle(color: Colors.white),
-              ),
-              subtitle: const Text(
-                'Tắt 5G → Bật 5G → Open App trước mỗi account',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              ),
-              activeThumbColor: AppColors.accent,
-              secondary: p.shortcut5gEnabled
-                  ? ElevatedButton.icon(
-                      icon: const Icon(Icons.play_arrow, size: 14),
-                      label: const Text('Chạy', style: TextStyle(fontSize: 11)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.accent,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        minimumSize: Size.zero,
-                      ),
-                      onPressed: () async {
-                        final ok = await ShortcutService.triggerShortcut('5G');
-                        if (!ok && mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Shortcut "5G" không tìm thấy'),
-                              backgroundColor: AppColors.error,
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        }
-                      },
-                    )
-                  : null,
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.travel_explore, color: AppColors.accent),
-              title: const Text(
-                'Mở trình duyệt độc lập',
-                style: TextStyle(color: Colors.white),
-              ),
-              subtitle: const Text(
-                'Check fingerprint, proxy, lướt web tự do',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              ),
-              trailing: const Icon(
-                Icons.arrow_forward_ios,
-                size: 14,
-                color: AppColors.textSecondary,
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const StandaloneBrowserScreen(),
+      builder: (sheetCtx) => Consumer<AppProvider>(
+        builder: (_, prov, __) => SingleChildScrollView(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(sheetCtx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // drag handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: pwCtrl,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Mật khẩu mặc định',
-                suffixIcon: Icon(
-                  Icons.lock_outline,
-                  color: AppColors.textSecondary,
                 ),
               ),
-              onChanged: p.setDefaultPassword,
-            ),
-          ],
+              const SizedBox(height: 16),
+              const Text(
+                'Cài đặt',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                value: prov.proxyEnabled,
+                onChanged: prov.setProxyEnabled,
+                title: const Text(
+                  'Bật Proxy',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: const Text(
+                  'Tự động dùng proxy khi mở tài khoản',
+                  style:
+                      TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                activeThumbColor: AppColors.secondary,
+              ),
+              SwitchListTile(
+                value: prov.fakeBrowser,
+                onChanged: prov.setFakeBrowser,
+                title: const Text(
+                  'Giả mạo trình duyệt',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: const Text(
+                  'Inject anti-fingerprint + block WebRTC',
+                  style:
+                      TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                activeThumbColor: AppColors.secondary,
+              ),
+              SwitchListTile(
+                value: prov.incognitoMode,
+                onChanged: prov.setIncognitoMode,
+                title: const Text(
+                  'Chế độ ẩn danh',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: const Text(
+                  'Xóa cookies/cache mỗi lần mở tài khoản',
+                  style:
+                      TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                activeThumbColor: AppColors.secondary,
+              ),
+              SwitchListTile(
+                value: prov.shortcut5gEnabled,
+                onChanged: prov.setShortcut5gEnabled,
+                title: const Text(
+                  'Shortcut 5G/WiFi',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: const Text(
+                  'Tắt 5G → Bật 5G → Open App trước mỗi account',
+                  style:
+                      TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                activeThumbColor: AppColors.accent,
+                secondary: prov.shortcut5gEnabled
+                    ? ElevatedButton.icon(
+                        icon: const Icon(Icons.play_arrow, size: 14),
+                        label:
+                            const Text('Chạy', style: TextStyle(fontSize: 11)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.accent,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          minimumSize: Size.zero,
+                        ),
+                        onPressed: () async {
+                          final ok =
+                              await ShortcutService.triggerShortcut('5G');
+                          if (!ok && ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(
+                                content: Text('Shortcut "5G" không tìm thấy'),
+                                backgroundColor: AppColors.error,
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        },
+                      )
+                    : null,
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(
+                  Icons.travel_explore,
+                  color: AppColors.accent,
+                ),
+                title: const Text(
+                  'Mở trình duyệt độc lập',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: const Text(
+                  'Check fingerprint, proxy, lướt web tự do',
+                  style:
+                      TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                trailing: const Icon(
+                  Icons.arrow_forward_ios,
+                  size: 14,
+                  color: AppColors.textSecondary,
+                ),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  Navigator.push(
+                    ctx,
+                    MaterialPageRoute(
+                      builder: (_) => const StandaloneBrowserScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: pwCtrl,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Mật khẩu mặc định',
+                  suffixIcon: Icon(
+                    Icons.lock_outline,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                onChanged: prov.setDefaultPassword,
+              ),
+            ],
+          ),
         ),
       ),
     );
