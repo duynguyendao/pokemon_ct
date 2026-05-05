@@ -432,11 +432,15 @@ class ImapService {
       if (!client.isConnected) return;
 
       final sequence = newMail.toMessageSequence();
-      final messages = await _fetchFullTextMessages(client, sequence);
+      
+      // Phase 1: Fetch only Envelope/UID to see if OTP is in Subject
+      final stopwatch = Stopwatch()..start();
+      final envelopeResult = await client.fetchMessages(sequence, '(UID ENVELOPE)');
+      _log('FETCH', 'Envelope fetched in ${stopwatch.elapsedMilliseconds}ms');
 
       final now = DateTime.now();
 
-      for (final msg in messages.messages) {
+      for (final msg in envelopeResult.messages) {
         final uid = msg.uid ?? 0;
         if (uid > 0 && _processedUids.contains(uid)) continue;
 
@@ -444,9 +448,28 @@ class ImapService {
         if (now.difference(msgDate).inHours >= 2) continue;
 
         final sender = msg.from?.first.email ?? '';
-        final recipient = msg.to?.first.email ?? msg.to?.first.toString();
         final subject = msg.decodeSubject() ?? '';
-        final body = _decodeBody(msg);
+        
+        // Try to extract OTP from subject first (Super Fast)
+        final otpFromSubject = extractOtp(sender: sender, subject: subject, body: '');
+        if (otpFromSubject != null) {
+          _log('FETCH', '🔥 OTP found in SUBJECT! Bypassing body fetch.');
+          if (uid > 0) _processedUids.add(uid);
+          _emitOtp(
+            otp: otpFromSubject,
+            sender: sender,
+            subject: subject,
+            recipient: msg.to?.first.email ?? msg.to?.first.toString(),
+            timestamp: msgDate,
+          );
+          continue; 
+        }
+
+        // Phase 2: If not in subject, fetch body
+        _log('FETCH', 'OTP not in subject, fetching partial body...');
+        final bodyResult = await _fetchFullTextMessages(client, MessageSequence.fromId(uid));
+        final bodyMsg = bodyResult.messages.first;
+        final body = _decodeBody(bodyMsg);
 
         final otp = extractOtp(sender: sender, subject: subject, body: body);
         if (otp != null && !_otpController.isClosed) {
@@ -455,7 +478,7 @@ class ImapService {
             otp: otp,
             sender: sender,
             subject: subject,
-            recipient: recipient,
+            recipient: bodyMsg.to?.first.email ?? bodyMsg.to?.first.toString(),
             timestamp: msgDate,
           );
         }
