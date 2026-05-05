@@ -42,6 +42,8 @@ class _IdleNewMail {
 
 class ImapService {
   static const _connectTimeout = Duration(seconds: 6);
+  static const _pollInterval = Duration(seconds: 6);
+  static const _fallbackPollMessages = 2;
 
   ImapClient? _client;
   bool _isRunning = false;
@@ -221,6 +223,11 @@ class ImapService {
         final fetched = await _fetchFullTextMessages(client, latestSequence);
 
         for (final message in fetched.messages) {
+          final uid = message.uid ?? 0;
+          if (uid > 0 && _processedUids.contains(uid)) {
+            continue;
+          }
+
           final sender =
               message.from?.first.email ?? message.from?.first.toString() ?? '';
           final recipient =
@@ -236,6 +243,10 @@ class ImapService {
           final otp = extractOtp(sender: sender, subject: subject, body: body);
           if (otp == null) {
             continue;
+          }
+
+          if (uid > 0) {
+            _processedUids.add(uid);
           }
 
           final entry = OtpEntry(
@@ -269,7 +280,10 @@ class ImapService {
   }
 
   MessageSequence? _latestInboxSequence(Mailbox inbox, int maxMessages) {
-    final latest = inbox.messagesExists;
+    return _latestSequenceFromCount(inbox.messagesExists, maxMessages);
+  }
+
+  MessageSequence? _latestSequenceFromCount(int latest, int maxMessages) {
     if (latest <= 0 || maxMessages <= 0) {
       return null;
     }
@@ -328,6 +342,8 @@ class ImapService {
             'New mail detected ${newMail.oldCount}->${newMail.newCount}',
           );
           await _fetchNew(client, newMail);
+        } else {
+          await _pollLatestInbox(client);
         }
       } catch (e) {
         _log('IDLE', 'Error: $e');
@@ -354,7 +370,7 @@ class ImapService {
 
     try {
       await idleClient.idleStart();
-      await Future.any([newMail.future, Future.delayed(Duration(seconds: 8))]);
+      await Future.any([newMail.future, Future.delayed(_pollInterval)]);
     } finally {
       await subscription.cancel();
       try {
@@ -378,7 +394,7 @@ class ImapService {
       if (newCount != null) {
         _lastExists = newCount;
       }
-      _log('HEARTBEAT', 'NOOP OK');
+      _log('HEARTBEAT', 'NOOP OK, fallback poll next');
     } catch (e) {
       _log('HEARTBEAT', 'NOOP failed: $e');
       rethrow;
@@ -428,48 +444,60 @@ class ImapService {
   }
 
   Future<void> _fetchNew(ImapClient client, _IdleNewMail newMail) async {
+    await _fetchSequence(
+      client,
+      newMail.toMessageSequence(),
+      maxAge: const Duration(hours: 2),
+      logTag: 'FETCH',
+    );
+  }
+
+  Future<void> _pollLatestInbox(ImapClient client) async {
+    final latest = _lastExists;
+    if (latest == null || latest <= 0) {
+      return;
+    }
+
+    final sequence = _latestSequenceFromCount(latest, _fallbackPollMessages);
+    if (sequence == null) {
+      return;
+    }
+
+    _log(
+      'POLL',
+      'Fallback fetch latest $_fallbackPollMessages messages (exists $latest)',
+    );
+    await _fetchSequence(
+      client,
+      sequence,
+      maxAge: const Duration(minutes: 2),
+      logTag: 'POLL',
+    );
+  }
+
+  Future<void> _fetchSequence(
+    ImapClient client,
+    MessageSequence sequence, {
+    required Duration maxAge,
+    required String logTag,
+  }) async {
     try {
       if (!client.isConnected) return;
 
-      final sequence = newMail.toMessageSequence();
-      
-      // Phase 1: Fetch only Envelope/UID to see if OTP is in Subject
-      final stopwatch = Stopwatch()..start();
-      final envelopeResult = await client.fetchMessages(sequence, '(UID ENVELOPE)');
-      _log('FETCH', 'Envelope fetched in ${stopwatch.elapsedMilliseconds}ms');
-
+      final result = await _fetchFullTextMessages(client, sequence);
       final now = DateTime.now();
 
-      for (final msg in envelopeResult.messages) {
+      for (final msg in result.messages) {
         final uid = msg.uid ?? 0;
         if (uid > 0 && _processedUids.contains(uid)) continue;
 
         final msgDate = msg.decodeDate() ?? DateTime.now();
-        if (now.difference(msgDate).inHours >= 2) continue;
+        if (now.difference(msgDate) > maxAge) continue;
 
         final sender = msg.from?.first.email ?? '';
+        final recipient = msg.to?.first.email ?? msg.to?.first.toString();
         final subject = msg.decodeSubject() ?? '';
-        
-        // Try to extract OTP from subject first (Super Fast)
-        final otpFromSubject = extractOtp(sender: sender, subject: subject, body: '');
-        if (otpFromSubject != null) {
-          _log('FETCH', '🔥 OTP found in SUBJECT! Bypassing body fetch.');
-          if (uid > 0) _processedUids.add(uid);
-          _emitOtp(
-            otp: otpFromSubject,
-            sender: sender,
-            subject: subject,
-            recipient: msg.to?.first.email ?? msg.to?.first.toString(),
-            timestamp: msgDate,
-          );
-          continue; 
-        }
-
-        // Phase 2: If not in subject, fetch body
-        _log('FETCH', 'OTP not in subject, fetching partial body...');
-        final bodyResult = await _fetchFullTextMessages(client, MessageSequence.fromId(uid));
-        final bodyMsg = bodyResult.messages.first;
-        final body = _decodeBody(bodyMsg);
+        final body = _decodeBody(msg);
 
         final otp = extractOtp(sender: sender, subject: subject, body: body);
         if (otp != null && !_otpController.isClosed) {
@@ -478,13 +506,13 @@ class ImapService {
             otp: otp,
             sender: sender,
             subject: subject,
-            recipient: bodyMsg.to?.first.email ?? bodyMsg.to?.first.toString(),
+            recipient: recipient,
             timestamp: msgDate,
           );
         }
       }
     } catch (e) {
-      _log('FETCH', 'Error: $e');
+      _log(logTag, 'Error: $e');
     }
   }
 
