@@ -10,7 +10,7 @@ void _log(String tag, String msg) {
 
 class ImapService {
   late ImapClient _client;
-  late ImapClient _idleClient;
+  ImapClient? _idleClient;
   bool _isRunning = false;
   bool _isIdleRunning = false;
   Timer? _heartbeatTimer;
@@ -66,12 +66,7 @@ class ImapService {
     });
   }
 
-  void _startIdleLoop(
-    String host,
-    int port,
-    String username,
-    String password,
-  ) {
+  void _startIdleLoop(String host, int port, String username, String password) {
     _isIdleRunning = true;
     unawaited(_runIdleLoop(host, port, username, password));
   }
@@ -84,16 +79,18 @@ class ImapService {
   ) async {
     while (_isRunning && _isIdleRunning) {
       try {
-        if (!_idleClient.isConnected) {
-          _idleClient = ImapClient();
-          await _idleClient.connectToServer(host, port, isSecure: true);
-          await _idleClient.login(username, password);
-          await _idleClient.selectInbox();
+        var idleClient = _idleClient;
+        if (idleClient == null || !idleClient.isConnected) {
+          idleClient = ImapClient();
+          _idleClient = idleClient;
+          await idleClient.connectToServer(host, port, isSecure: true);
+          await idleClient.login(username, password);
+          await idleClient.selectInbox();
           _log('IDLE', 'Connected');
         }
 
         _log('IDLE', 'Waiting for mail...');
-        final hasNewMail = await _idleClient.idleUntilNewMail(Duration(minutes: 9));
+        final hasNewMail = await _waitForNewMail(idleClient);
 
         if (!_isRunning || !_isIdleRunning) break;
 
@@ -104,7 +101,7 @@ class ImapService {
       } catch (e) {
         _log('IDLE', 'Error: $e');
         try {
-          await _idleClient.closeConnection();
+          await _idleClient?.disconnect();
         } catch (_) {}
 
         if (_isRunning && _isIdleRunning) {
@@ -114,24 +111,48 @@ class ImapService {
     }
   }
 
+  Future<bool> _waitForNewMail(ImapClient idleClient) async {
+    final newMail = Completer<void>();
+    final subscription = idleClient.eventBus
+        .on<ImapMessagesExistEvent>()
+        .listen((_) {
+          if (!newMail.isCompleted) {
+            newMail.complete();
+          }
+        });
+
+    try {
+      await idleClient.idleStart();
+      await Future.any([newMail.future, Future.delayed(Duration(minutes: 9))]);
+    } finally {
+      await subscription.cancel();
+      try {
+        await idleClient.idleDone();
+      } catch (_) {}
+    }
+
+    return newMail.isCompleted;
+  }
+
   Future<void> _fetchNew() async {
     try {
       if (!_client.isConnected) return;
 
-      // Search UNSEEN emails
-      final messageSequence = MessageSequence.unseen();
-      final unreadMessages = await _client.search(messageSequence, returnUids: true);
+      final searchResult = await _client.uidSearchMessages(
+        searchCriteria: 'UNSEEN',
+      );
+      final unreadMessages = searchResult.matchingSequence;
 
-      if (unreadMessages == null || unreadMessages.isEmpty) return;
+      if (unreadMessages == null || unreadMessages.isEmpty) {
+        return;
+      }
 
       _log('FETCH', 'Found ${unreadMessages.length} unseen email(s)');
 
-      // Fetch messages with headers and text
-      final criteria = FetchPreference.headers | FetchPreference.textContent | FetchPreference.structure;
-      final imapClient = _client;
-      final messages = await imapClient.fetchMessages(unreadMessages, criteria: criteria);
-
-      if (messages == null) return;
+      final messages = await _client.uidFetchMessages(
+        unreadMessages,
+        '(UID FLAGS BODY.PEEK[])',
+      );
 
       final now = DateTime.now();
 
@@ -145,7 +166,8 @@ class ImapService {
 
         final sender = msg.from?.first.email ?? '';
         final subject = msg.decodeSubject() ?? '';
-        final body = msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
+        final body =
+            msg.decodeTextPlainPart() ?? msg.decodeTextHtmlPart() ?? '';
 
         // Match filter
         if (!_matchesFilter(sender, subject)) continue;
@@ -154,12 +176,14 @@ class ImapService {
         final otp = _extractOtp(sender, subject, body);
         if (otp != null && !_otpController.isClosed) {
           _log('FETCH', 'OTP: $otp');
-          _otpController.add(OtpEntry(
-            code: otp,
-            sender: sender,
-            subject: subject,
-            timestamp: msgDate,
-          ));
+          _otpController.add(
+            OtpEntry(
+              code: otp,
+              sender: sender,
+              subject: subject,
+              timestamp: msgDate,
+            ),
+          );
         }
       }
     } catch (e) {
@@ -183,7 +207,10 @@ class ImapService {
           break;
         case FilterType.regex:
           try {
-            matches = RegExp(rule.pattern, caseSensitive: false).hasMatch(subject);
+            matches = RegExp(
+              rule.pattern,
+              caseSensitive: false,
+            ).hasMatch(subject);
           } catch (_) {}
           break;
         default:
@@ -214,7 +241,7 @@ class ImapService {
     } catch (_) {}
 
     try {
-      await _idleClient.disconnect();
+      await _idleClient?.disconnect();
     } catch (_) {}
 
     _log('STOP', 'Stopped');
