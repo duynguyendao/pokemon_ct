@@ -415,14 +415,75 @@ class AppProvider extends ChangeNotifier {
     return message;
   }
 
-  Future<List<OtpEntry>> fetchOtpNow() async => [];
+  Future<List<OtpEntry>> fetchOtpNow() async {
+    final host = _imapConfig['host']?.trim();
+    final portStr = _imapConfig['port']?.trim();
+    final user = _imapConfig['username']?.trim();
+    final pass = _imapConfig['password'];
+
+    if (host == null || host.isEmpty || user == null || user.isEmpty) {
+      return [];
+    }
+    if (pass == null || pass.trim().isEmpty) {
+      return [];
+    }
+
+    final results = await _imap.fetchRecentOtps(
+      host: host,
+      port: int.tryParse(portStr ?? '') ?? 993,
+      username: user,
+      password: pass,
+    );
+
+    return results;
+  }
+
   Future<List<EmailSearchResult>> searchEmails({
     String subjectKeyword = '',
     String bodyKeyword = '',
     DateTime? from,
     DateTime? to,
     int maxMessages = 20,
-  }) async => [];
+  }) async {
+    final host = _imapConfig['host']?.trim();
+    final portStr = _imapConfig['port']?.trim();
+    final user = _imapConfig['username']?.trim();
+    final pass = _imapConfig['password'];
+
+    if (host == null || host.isEmpty) {
+      throw StateError('Host IMAP đang trống.');
+    }
+    if (user == null || user.isEmpty) {
+      throw StateError('Email IMAP đang trống.');
+    }
+    if (pass == null || pass.trim().isEmpty) {
+      throw StateError('App Password đang trống.');
+    }
+
+    final results = await _imap.searchEmails(
+      host: host,
+      port: int.tryParse(portStr ?? '') ?? 993,
+      username: user,
+      password: pass,
+      subjectKeyword: subjectKeyword,
+      bodyKeyword: bodyKeyword,
+      from: from,
+      to: to,
+      maxMessages: maxMessages,
+    );
+
+    return results
+        .map(
+          (result) => EmailSearchResult(
+            subject: result.subject,
+            sender: result.sender,
+            body: result.body,
+            date: result.date,
+            otpFound: result.otpFound,
+          ),
+        )
+        .toList();
+  }
 
   Future<void> setAllAccountsMode(AccountMode mode) async {
     for (var i = 0; i < _accounts.length; i++) {

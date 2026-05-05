@@ -36,7 +36,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   // Search
   final _searchSubjectCtrl = TextEditingController(text: 'ポケモンセンター');
   final _searchBodyCtrl = TextEditingController();
-  DateTime _searchFrom = DateTime.now().subtract(const Duration(minutes: 2));
+  DateTime _searchFrom = DateTime.now().subtract(const Duration(minutes: 30));
   DateTime _searchTo = DateTime.now();
   List<EmailSearchResult> _searchResults = [];
   bool _searching = false;
@@ -54,6 +54,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 4, vsync: this);
+    _searchSubjectCtrl.clear();
     _loadConfig();
   }
 
