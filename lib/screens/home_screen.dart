@@ -9,6 +9,7 @@ import '../widgets/account_card.dart';
 import '../widgets/summary_card.dart';
 import 'add_account_screen.dart';
 import 'browser_screen.dart';
+import 'standalone_browser_screen.dart';
 import 'package:share_plus/share_plus.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -159,48 +160,49 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _openAccount(Account account, AppProvider p) async {
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          backgroundColor: AppColors.card,
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 40,
-                height: 40,
-                child: CircularProgressIndicator(color: AppColors.accent),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                '⚡ Chạy 5G Shortcut...',
-                style: TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                account.mode == AccountMode.loginOnly
-                    ? 'Login'
-                    : account.mode == AccountMode.lottery
-                    ? 'Lottery'
-                    : 'Lottery Result',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
+    if (p.shortcut5gEnabled) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            backgroundColor: AppColors.card,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: CircularProgressIndicator(color: AppColors.accent),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                const Text(
+                  '⚡ Chạy 5G Shortcut...',
+                  style: TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  account.mode == AccountMode.loginOnly
+                      ? 'Login'
+                      : account.mode == AccountMode.lottery
+                      ? 'Lottery'
+                      : 'Lottery Result',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      );
+        );
+      }
+      await ShortcutService.triggerShortcut('5G');
+      await Future.delayed(const Duration(seconds: 5));
+      if (mounted) Navigator.pop(context);
     }
 
-    await ShortcutService.triggerShortcut('5G');
-    await Future.delayed(const Duration(seconds: 5));
-
     if (mounted) {
-      Navigator.pop(context);
 
       // Xác định URL theo mode của account
       String startUrl = p.loginUrl;
@@ -653,39 +655,70 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               activeThumbColor: AppColors.secondary,
             ),
-            ListTile(
+            SwitchListTile(
+              value: p.shortcut5gEnabled,
+              onChanged: p.setShortcut5gEnabled,
               title: const Text(
-                'Bật 5G/WiFi Shortcut',
+                'Shortcut 5G/WiFi',
                 style: TextStyle(color: Colors.white),
               ),
               subtitle: const Text(
-                'Gọi Shortcut: Tắt 5G → Bật 5G → Open App',
+                'Tắt 5G → Bật 5G → Open App trước mỗi account',
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
               ),
-              trailing: ElevatedButton.icon(
-                icon: const Icon(Icons.play_arrow, size: 16),
-                label: const Text('Chạy', style: TextStyle(fontSize: 11)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.accent,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  minimumSize: Size.zero,
-                ),
-                onPressed: () async {
-                  final ok = await ShortcutService.triggerShortcut('5G');
-                  if (!ok && mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Shortcut "5G" không tìm thấy'),
-                        backgroundColor: AppColors.error,
-                        duration: Duration(seconds: 2),
+              activeThumbColor: AppColors.accent,
+              secondary: p.shortcut5gEnabled
+                  ? ElevatedButton.icon(
+                      icon: const Icon(Icons.play_arrow, size: 14),
+                      label: const Text('Chạy', style: TextStyle(fontSize: 11)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        minimumSize: Size.zero,
                       ),
-                    );
-                  }
-                },
+                      onPressed: () async {
+                        final ok = await ShortcutService.triggerShortcut('5G');
+                        if (!ok && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Shortcut "5G" không tìm thấy'),
+                              backgroundColor: AppColors.error,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      },
+                    )
+                  : null,
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.travel_explore, color: AppColors.accent),
+              title: const Text(
+                'Mở trình duyệt độc lập',
+                style: TextStyle(color: Colors.white),
               ),
+              subtitle: const Text(
+                'Check fingerprint, proxy, lướt web tự do',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
+              trailing: const Icon(
+                Icons.arrow_forward_ios,
+                size: 14,
+                color: AppColors.textSecondary,
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const StandaloneBrowserScreen(),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 8),
             TextField(
@@ -844,6 +877,16 @@ class _HomeScreenState extends State<HomeScreen>
               icon: const Icon(Icons.tune, color: AppColors.secondary),
               tooltip: 'Set global mode (Login/Lottery/Result)',
               onPressed: () => _showGlobalModeDialog(context, p),
+            ),
+            IconButton(
+              icon: const Icon(Icons.travel_explore, color: AppColors.accent),
+              tooltip: 'Trình duyệt độc lập',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const StandaloneBrowserScreen(),
+                ),
+              ),
             ),
             IconButton(
               icon: Icon(_searchVisible ? Icons.close : Icons.search),

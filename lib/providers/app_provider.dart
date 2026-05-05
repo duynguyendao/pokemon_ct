@@ -23,6 +23,7 @@ class AppProvider extends ChangeNotifier {
   bool _proxyEnabled = false;
   bool _fakeBrowser = true;
   bool _incognitoMode = false;
+  bool _shortcut5gEnabled = true;
   bool _loaded = false;
   bool _imapStarting = false;
   bool _imapStopping = false;
@@ -47,6 +48,7 @@ class AppProvider extends ChangeNotifier {
   bool get proxyEnabled => _proxyEnabled;
   bool get fakeBrowser => _fakeBrowser;
   bool get incognitoMode => _incognitoMode;
+  bool get shortcut5gEnabled => _shortcut5gEnabled;
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
@@ -82,6 +84,7 @@ class AppProvider extends ChangeNotifier {
     _proxyEnabled = await _storage.loadProxyEnabled();
     _fakeBrowser = await _storage.loadFakeBrowser();
     _incognitoMode = await _storage.loadIncognitoMode();
+    _shortcut5gEnabled = await _storage.loadShortcut5gEnabled();
     _loaded = true;
     _setupOtpStream();
     notifyListeners();
@@ -232,6 +235,12 @@ class AppProvider extends ChangeNotifier {
   Future<void> setIncognitoMode(bool v) async {
     _incognitoMode = v;
     await _storage.saveIncognitoMode(v);
+    notifyListeners();
+  }
+
+  Future<void> setShortcut5gEnabled(bool v) async {
+    _shortcut5gEnabled = v;
+    await _storage.saveShortcut5gEnabled(v);
     notifyListeners();
   }
 

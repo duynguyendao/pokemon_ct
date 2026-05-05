@@ -15,6 +15,7 @@ class StorageService {
   static const _proxyEnabledKey = 'proxyEnabled';
   static const _fakeBrowserKey = 'fakeBrowser';
   static const _incognitoModeKey = 'incognitoMode';
+  static const _shortcut5gEnabledKey = 'shortcut5gEnabled';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -129,6 +130,16 @@ class StorageService {
   Future<void> saveIncognitoMode(bool v) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_incognitoModeKey, v);
+  }
+
+  Future<bool> loadShortcut5gEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_shortcut5gEnabledKey) ?? true;
+  }
+
+  Future<void> saveShortcut5gEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_shortcut5gEnabledKey, v);
   }
 
   List<FilterRule> _defaultRules() => [
