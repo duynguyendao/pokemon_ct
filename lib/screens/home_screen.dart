@@ -640,6 +640,19 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               activeThumbColor: AppColors.secondary,
             ),
+            SwitchListTile(
+              value: p.incognitoMode,
+              onChanged: p.setIncognitoMode,
+              title: const Text(
+                'Chế độ ẩn danh',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: const Text(
+                'Xóa cookies/cache mỗi lần mở tài khoản',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
+              activeThumbColor: AppColors.secondary,
+            ),
             ListTile(
               title: const Text(
                 'Bật 5G/WiFi Shortcut',

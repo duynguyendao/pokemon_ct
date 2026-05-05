@@ -95,8 +95,46 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void initState() {
     super.initState();
     _profile = randomProfile();
-    final startUrl = widget.startUrl ?? context.read<AppProvider>().loginUrl;
-    _initController(startUrl);
+    final p = context.read<AppProvider>();
+    final startUrl = widget.startUrl ?? p.loginUrl;
+    _initController(startUrl, incognito: p.incognitoMode);
+
+    // Show UA toast after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final shortUa = _shortUaLabel(_profile.userAgent);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.devices, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${_profile.name}  •  $shortUa',
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF2A2D3E),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    });
+  }
+
+  /// Extracts a short browser label from a full UA string.
+  String _shortUaLabel(String ua) {
+    final chromeMatch = RegExp(r'Chrome/([\d.]+)').firstMatch(ua);
+    if (chromeMatch != null) return 'Chrome ${chromeMatch.group(1)!.split('.').first}';
+    final safariMatch = RegExp(r'Version/([\d.]+)').firstMatch(ua);
+    if (safariMatch != null) return 'Safari ${safariMatch.group(1)}';
+    return ua.length > 30 ? '${ua.substring(0, 30)}…' : ua;
   }
 
   void _showStatusOverlay(String text) {
@@ -222,7 +260,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         !u.contains('twostep');
   }
 
-  void _initController(String startUrl) {
+  void _initController(String startUrl, {bool incognito = false}) {
     final p = context.read<AppProvider>();
 
     _controller = WebViewController()
@@ -299,9 +337,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
       ..addJavaScriptChannel(
         'FlutterChannel',
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
-      )
-      ..loadRequest(Uri.parse(startUrl));
+      );
 
+    if (incognito) {
+      // Clear all cookies + localStorage before loading
+      WebViewCookieManager().clearCookies();
+      _controller.runJavaScript(
+        'try { localStorage.clear(); sessionStorage.clear(); } catch(e) {}',
+      );
+    }
+
+    _controller.loadRequest(Uri.parse(startUrl));
     setState(() => _currentUrl = startUrl);
   }
 

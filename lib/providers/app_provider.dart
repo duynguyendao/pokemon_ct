@@ -22,6 +22,7 @@ class AppProvider extends ChangeNotifier {
   String _defaultPassword = '';
   bool _proxyEnabled = false;
   bool _fakeBrowser = true;
+  bool _incognitoMode = false;
   bool _loaded = false;
   bool _imapStarting = false;
   bool _imapStopping = false;
@@ -45,6 +46,7 @@ class AppProvider extends ChangeNotifier {
   String get defaultPassword => _defaultPassword;
   bool get proxyEnabled => _proxyEnabled;
   bool get fakeBrowser => _fakeBrowser;
+  bool get incognitoMode => _incognitoMode;
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
@@ -79,6 +81,7 @@ class AppProvider extends ChangeNotifier {
     _defaultPassword = await _storage.loadDefaultPassword();
     _proxyEnabled = await _storage.loadProxyEnabled();
     _fakeBrowser = await _storage.loadFakeBrowser();
+    _incognitoMode = await _storage.loadIncognitoMode();
     _loaded = true;
     _setupOtpStream();
     notifyListeners();
@@ -223,6 +226,12 @@ class AppProvider extends ChangeNotifier {
   Future<void> setFakeBrowser(bool v) async {
     _fakeBrowser = v;
     await _storage.saveFakeBrowser(v);
+    notifyListeners();
+  }
+
+  Future<void> setIncognitoMode(bool v) async {
+    _incognitoMode = v;
+    await _storage.saveIncognitoMode(v);
     notifyListeners();
   }
 
