@@ -42,6 +42,8 @@ class _IdleNewMail {
 }
 
 class ImapService {
+  static const _connectTimeout = Duration(seconds: 6);
+
   ImapClient? _client;
   bool _isRunning = false;
   bool _isIdleRunning = false;
@@ -74,9 +76,7 @@ class ImapService {
     final client = ImapClient();
 
     try {
-      await client.connectToServer(host, port, isSecure: port == 993);
-      await client.login(username, normalizePassword(password));
-      await client.selectInbox();
+      await _connectClient(client, host, port, username, password);
       _log('TEST', 'Connected OK');
       await client.logout();
     } catch (e) {
@@ -200,8 +200,8 @@ class ImapService {
     required int port,
     required String username,
     required String password,
-    int maxMessages = 80,
-    Duration maxAge = const Duration(hours: 2),
+    int maxMessages = 3,
+    Duration maxAge = const Duration(minutes: 2),
   }) async {
     final client = ImapClient();
 
@@ -227,9 +227,9 @@ class ImapService {
           'FETCH_NOW',
           '$mailbox matched ${sequence.length}, fetching ${ids.length}',
         );
-        final fetched = await client.fetchMessages(
+        final fetched = await _fetchLeanMessages(
+          client,
           MessageSequence.fromIds(ids),
-          '(BODY.PEEK[])',
         );
 
         for (final message in fetched.messages) {
@@ -482,9 +482,21 @@ class ImapService {
     String username,
     String password,
   ) async {
-    await client.connectToServer(host, port, isSecure: port == 993);
+    final stopwatch = Stopwatch()..start();
+
+    await client.connectToServer(
+      host,
+      port,
+      isSecure: port == 993,
+      timeout: _connectTimeout,
+    );
+    _log('CONNECT', 'Socket ready in ${stopwatch.elapsedMilliseconds}ms');
+
     await client.login(username, normalizePassword(password));
+    _log('CONNECT', 'Login OK in ${stopwatch.elapsedMilliseconds}ms');
+
     await client.selectInbox();
+    _log('CONNECT', 'INBOX selected in ${stopwatch.elapsedMilliseconds}ms');
   }
 
   Future<bool> _trySelectMailbox(ImapClient client, String mailbox) async {
