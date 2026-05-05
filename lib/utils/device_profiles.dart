@@ -433,52 +433,6 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       { name: 'Chrome PDF Viewer',  filename: 'internal-pdf-viewer' },
     ]));
 
-    // ── 11. WebRTC IP leak prevention ─────────────────────────────────────
-    // Block RTCPeerConnection to prevent ICE candidates from exposing real IP
-    (function blockWebRTC() {
-      try {
-        const noop = function() {};
-        const noopPC = function() {
-          return {
-            createOffer: () => Promise.reject(new Error('WebRTC disabled')),
-            createAnswer: () => Promise.reject(new Error('WebRTC disabled')),
-            setLocalDescription: noop,
-            setRemoteDescription: noop,
-            addIceCandidate: noop,
-            close: noop,
-            addEventListener: noop,
-            removeEventListener: noop,
-            getStats: () => Promise.resolve(new Map()),
-            iceConnectionState: 'closed',
-            iceGatheringState: 'complete',
-            signalingState: 'closed',
-          };
-        };
-
-        // Override all WebRTC constructors
-        ['RTCPeerConnection', 'webkitRTCPeerConnection', 'mozRTCPeerConnection'].forEach(function(name) {
-          if (window[name]) {
-            window[name] = noopPC;
-            window[name].prototype = {};
-            Object.defineProperty(window, name, {
-              get: () => noopPC,
-              set: noop,
-              configurable: false,
-            });
-          }
-        });
-
-        // Also patch getUserMedia to prevent mic/camera IP leak
-        if (navigator.mediaDevices) {
-          navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('NotAllowedError'));
-          navigator.mediaDevices.enumerateDevices = () => Promise.resolve([]);
-        }
-        if (navigator.getUserMedia) navigator.getUserMedia = noop;
-        if (navigator.webkitGetUserMedia) navigator.webkitGetUserMedia = noop;
-        if (navigator.mozGetUserMedia) navigator.mozGetUserMedia = noop;
-      } catch(e) {}
-    })();
-
   } catch(e) {}
 })();
 ''';
