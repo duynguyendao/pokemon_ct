@@ -6,7 +6,6 @@ import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
 import '../services/storage_service.dart';
 import '../services/imap_service.dart';
-export '../services/imap_service.dart' show EmailSearchResult;
 
 class AppProvider extends ChangeNotifier {
   final StorageService _storage = StorageService();
@@ -17,21 +16,15 @@ class AppProvider extends ChangeNotifier {
   List<String> _groups = [];
   List<FilterRule> _filterRules = [];
   List<OtpEntry> _otpHistory = [];
-  final Map<String, OtpEntry> _latestOtpByRecipient = {};
-  OtpEntry? _latestOtpWithoutRecipient;
   Map<String, String> _imapConfig = {};
   Map<String, String> _urlConfig = {};
 
   String _defaultPassword = '';
   bool _proxyEnabled = false;
   bool _fakeBrowser = true;
-  bool _imapRunning = false;
-  bool _imapStarting = false;
-  bool _imapStopping = false;
-  String? _imapError;
   bool _loaded = false;
-  Future<void>? _imapStartFuture;
 
+  final _otpController = StreamController<OtpEntry>.broadcast();
   StreamSubscription<OtpEntry>? _otpSub;
 
   // Getters
@@ -40,7 +33,6 @@ class AppProvider extends ChangeNotifier {
   List<String> get groups => _groups;
   List<FilterRule> get filterRules => _filterRules;
   List<OtpEntry> get otpHistory => _otpHistory;
-  Stream<OtpEntry> get otpStream => _imap.otpStream;
   Map<String, String> get imapConfig => _imapConfig;
   Map<String, String> get urlConfig => _urlConfig;
   String get loginUrl =>
@@ -50,11 +42,12 @@ class AppProvider extends ChangeNotifier {
   String get defaultPassword => _defaultPassword;
   bool get proxyEnabled => _proxyEnabled;
   bool get fakeBrowser => _fakeBrowser;
-  bool get imapRunning => _imapRunning && _imap.isRunning;
-  bool get imapStarting => _imapStarting;
-  bool get imapStopping => _imapStopping;
-  String? get imapError => _imapError;
   bool get loaded => _loaded;
+  Stream<OtpEntry> get otpStream => _otpController.stream;
+  bool get imapRunning => _imap.isRunning;
+  bool get imapStarting => false;
+  bool get imapStopping => false;
+  String? get imapError => null;
 
   int get todoCount => _accounts.where((a) => a.status == 'todo').length;
   int get doneCount => _accounts.where((a) => a.status == 'done').length;
@@ -87,48 +80,16 @@ class AppProvider extends ChangeNotifier {
     _imap.setRules(_filterRules);
     _setupOtpStream();
     notifyListeners();
-
-    // Auto-start IMAP polling when app loads if credentials are saved
-    if (_imapConfig['password']?.isNotEmpty == true) {
-      unawaited(startImap());
-    }
   }
 
   void _setupOtpStream() {
     _otpSub?.cancel();
     _otpSub = _imap.otpStream.listen((otp) {
-      _cacheOtp(otp);
-      if (!_isDuplicateOtp(otp)) {
-        _otpHistory.insert(0, otp);
-        if (_otpHistory.length > 50) _otpHistory.removeLast();
+      addOtpEntry(otp);
+      if (!_otpController.isClosed) {
+        _otpController.add(otp);
       }
-      notifyListeners();
     });
-  }
-
-  void _cacheOtp(OtpEntry otp) {
-    final recipient = otp.recipient?.trim() ?? '';
-    if (recipient.isEmpty) {
-      if (_latestOtpWithoutRecipient == null ||
-          otp.timestamp.isAfter(_latestOtpWithoutRecipient!.timestamp)) {
-        _latestOtpWithoutRecipient = otp;
-      }
-      return;
-    }
-
-    final key = _normalizeEmail(recipient);
-    final current = _latestOtpByRecipient[key];
-    if (current == null || otp.timestamp.isAfter(current.timestamp)) {
-      _latestOtpByRecipient[key] = otp;
-    }
-  }
-
-  bool _isDuplicateOtp(OtpEntry otp) {
-    return _otpHistory.any(
-      (e) =>
-          e.code == otp.code &&
-          otp.timestamp.difference(e.timestamp).abs().inSeconds < 30,
-    );
   }
 
   // --- Accounts ---
@@ -273,7 +234,6 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> saveFilterRules(List<FilterRule> rules) async {
     _filterRules = rules;
-    _imap.setRules(rules);
     await _storage.saveFilterRules(rules);
     notifyListeners();
   }
@@ -286,7 +246,7 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- IMAP ---
+  // --- IMAP Config ---
 
   Future<void> saveImapConfig(Map<String, String> config) async {
     _imapConfig = config;
@@ -294,178 +254,39 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> testImapConnection() async {
-    final config = _buildImapConfig();
-    if (config == null) return false;
-    return _imap.testConnection(config);
-  }
+  // --- OTP History ---
 
-  Future<void> startImap() async {
-    if (_imap.isRunning) {
-      if (!_imapRunning) {
-        _imapRunning = true;
-        notifyListeners();
-      }
-      return;
+  void addOtpEntry(OtpEntry otp) {
+    _otpHistory.insert(0, otp);
+    if (_otpHistory.length > 5) {
+      _otpHistory.removeLast();
     }
-
-    final inFlight = _imapStartFuture;
-    if (inFlight != null) return inFlight;
-
-    final future = _startImapImpl();
-    _imapStartFuture = future;
-    future.whenComplete(() {
-      if (identical(_imapStartFuture, future)) {
-        _imapStartFuture = null;
-      }
-    });
-    return future;
-  }
-
-  Future<void> _startImapImpl() async {
-    final config = _buildImapConfig();
-    if (config == null) return;
-    _imapError = null;
-    _imapStarting = true;
     notifyListeners();
-    try {
-      await _imap.start(config);
-      _imapRunning = true;
-    } catch (e) {
-      _imapError = e.toString();
-      _imapRunning = false;
-    } finally {
-      _imapStarting = false;
-      notifyListeners();
-    }
-  }
-
-  Future<bool> ensureOtpServerRunning() async {
-    if (_imap.isRunning) {
-      if (!_imapRunning) {
-        _imapRunning = true;
-        notifyListeners();
-      }
-      return true;
-    }
-
-    await startImap();
-    return _imap.isRunning;
-  }
-
-  Future<void> stopImap() async {
-    _imapStopping = true;
-    _imapRunning = false; // immediate UI feedback
-    notifyListeners();
-    try {
-      await _imap.stop();
-    } finally {
-      _imapStopping = false;
-      notifyListeners();
-    }
   }
 
   void clearOtpHistory() {
     _otpHistory.clear();
-    _latestOtpByRecipient.clear();
-    _latestOtpWithoutRecipient = null;
     notifyListeners();
   }
 
-  Future<List<OtpEntry>> fetchOtpNow() async {
-    final results = await _imap.fetchNow();
-    for (final otp in results) {
-      _cacheOtp(otp);
-      if (!_isDuplicateOtp(otp)) {
-        _otpHistory.insert(0, otp);
-      }
-    }
-    if (_otpHistory.length > 50) {
-      _otpHistory = _otpHistory.take(50).toList();
-    }
-    notifyListeners();
-    return results;
-  }
+  OtpEntry? getLatestOtp(String email, {DateTime? after}) {
+    final normalized = _normalizeEmail(email);
 
-  Future<List<EmailSearchResult>> searchEmails({
-    String subjectKeyword = '',
-    String bodyKeyword = '',
-    DateTime? from,
-    DateTime? to,
-    int maxMessages = 20,
-  }) async {
-    final config = _buildImapConfig();
-    if (config == null) return [];
-    return _imap.searchEmails(
-      config: config,
-      subjectKeyword: subjectKeyword,
-      bodyKeyword: bodyKeyword,
-      from: from,
-      to: to,
-      maxMessages: maxMessages,
-    );
-  }
-
-  ImapConfig? _buildImapConfig() {
-    final host = _imapConfig['host'];
-    final portStr = _imapConfig['port'];
-    final user = _imapConfig['username'];
-    final pass = _imapConfig['password'];
-
-    if (host == null || user == null || pass == null) return null;
-
-    return ImapConfig(
-      host: host,
-      port: int.tryParse(portStr ?? '') ?? 993,
-      username: user,
-      password: pass,
-      isSecure: (int.tryParse(portStr ?? '') ?? 993) == 993,
-      pollIntervalSeconds: 3,
-    );
-  }
-
-  String? get latestOtp =>
-      _otpHistory.isNotEmpty ? _otpHistory.first.code : null;
-
-  /// Lấy OTP mới nhất dành riêng cho account email này.
-  /// [after]: chỉ lấy OTP có timestamp >= after (lọc theo thời điểm bấm ログイン).
-  String? latestOtpForEmail(String accountEmail, {DateTime? after}) {
-    return latestOtpEntryForEmail(accountEmail, after: after)?.code;
-  }
-
-  /// OTP entry mới nhất cho account email.
-  /// [after]: chỉ lấy OTP có timestamp >= after.
-  OtpEntry? latestOtpEntryForEmail(String accountEmail, {DateTime? after}) {
-    final cached = _latestOtpByRecipient[_normalizeEmail(accountEmail)];
-    if (cached != null &&
-        (after == null || !cached.timestamp.isBefore(after))) {
-      return cached;
-    }
-
-    final unknown = _latestOtpWithoutRecipient;
-    if (unknown != null &&
-        (after == null || !unknown.timestamp.isBefore(after))) {
-      return unknown;
-    }
-
-    OtpEntry? unknownRecipientFallback;
     for (final otp in _otpHistory) {
       if (after != null && otp.timestamp.isBefore(after)) continue;
+
       final recipient = otp.recipient?.trim() ?? '';
       if (recipient.isEmpty) {
-        unknownRecipientFallback ??= otp;
-        _cacheOtp(otp);
-        continue;
+        return otp;
       }
-      if (!_sameEmailAddress(recipient, accountEmail)) continue;
-      _cacheOtp(otp);
-      return otp;
-    }
-    return unknownRecipientFallback;
-  }
 
-  bool _sameEmailAddress(String a, String b) =>
-      _normalizeEmail(a) == _normalizeEmail(b);
+      if (_normalizeEmail(recipient) == normalized) {
+        return otp;
+      }
+    }
+
+    return null;
+  }
 
   String _normalizeEmail(String email) {
     final trimmed = email.toLowerCase().trim();
@@ -484,6 +305,45 @@ class AppProvider extends ChangeNotifier {
     return '$local@$domain';
   }
 
+  String? latestOtpForEmail(String email, {DateTime? after}) {
+    return getLatestOtp(email, after: after)?.code;
+  }
+
+  // --- IMAP Control ---
+  Future<void> startImap() async {
+    final host = _imapConfig['host'];
+    final portStr = _imapConfig['port'];
+    final user = _imapConfig['username'];
+    final pass = _imapConfig['password'];
+
+    if (host == null || user == null || pass == null) return;
+
+    await _imap.start(
+      host: host,
+      port: int.tryParse(portStr ?? '') ?? 993,
+      username: user,
+      password: pass,
+    );
+  }
+
+  Future<void> stopImap() async {
+    await _imap.stop();
+  }
+
+  Future<bool> testImapConnection() async {
+    // Stub - implement if needed
+    return false;
+  }
+
+  Future<List<OtpEntry>> fetchOtpNow() async => [];
+  Future<List<EmailSearchResult>> searchEmails({
+    String subjectKeyword = '',
+    String bodyKeyword = '',
+    DateTime? from,
+    DateTime? to,
+    int maxMessages = 20,
+  }) async => [];
+
   Future<void> setAllAccountsMode(AccountMode mode) async {
     for (var i = 0; i < _accounts.length; i++) {
       _accounts[i] = _accounts[i].copyWith(mode: mode);
@@ -495,7 +355,24 @@ class AppProvider extends ChangeNotifier {
   @override
   void dispose() {
     _otpSub?.cancel();
+    _otpController.close();
     _imap.dispose();
     super.dispose();
   }
+}
+
+class EmailSearchResult {
+  final String subject;
+  final String sender;
+  final String body;
+  final DateTime date;
+  final String? otpFound;
+
+  const EmailSearchResult({
+    required this.subject,
+    required this.sender,
+    required this.body,
+    required this.date,
+    this.otpFound,
+  });
 }

@@ -1,5 +1,4 @@
 import 'package:uuid/uuid.dart';
-import '../services/otp_extractor.dart';
 
 enum FilterType { sender, subject, recipient, body, regex }
 
@@ -44,7 +43,10 @@ class FilterRule {
       } catch (_) {}
     }
 
-    return extractOtpFromText(text);
+    // Fallback: extract 6-digit OTP
+    final otpPattern = RegExp(r'\b[0-9]{6}\b');
+    final match = otpPattern.firstMatch(text);
+    return match?.group(0);
   }
 
   Map<String, dynamic> toJson() => {
