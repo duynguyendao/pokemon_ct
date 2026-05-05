@@ -22,8 +22,36 @@ class ImapService {
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get isRunning => _isRunning;
 
+  static String normalizePassword(String password) {
+    return password.replaceAll(RegExp(r'\s+'), '');
+  }
+
   void setRules(List<FilterRule> rules) {
     _rules = rules.where((r) => r.enabled).toList();
+  }
+
+  Future<void> testConnection({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+  }) async {
+    final client = ImapClient();
+
+    try {
+      await client.connectToServer(host, port, isSecure: port == 993);
+      await client.login(username, normalizePassword(password));
+      await client.selectInbox();
+      _log('TEST', 'Connected OK');
+      await client.logout();
+    } catch (e) {
+      _log('TEST', 'Failed: $e');
+      rethrow;
+    } finally {
+      try {
+        await client.disconnect();
+      } catch (_) {}
+    }
   }
 
   Future<void> start({
@@ -39,8 +67,8 @@ class ImapService {
 
     try {
       _client = ImapClient();
-      await _client.connectToServer(host, port, isSecure: true);
-      await _client.login(username, password);
+      await _client.connectToServer(host, port, isSecure: port == 993);
+      await _client.login(username, normalizePassword(password));
       await _client.selectInbox();
 
       _log('START', 'Connected OK');
@@ -83,8 +111,8 @@ class ImapService {
         if (idleClient == null || !idleClient.isConnected) {
           idleClient = ImapClient();
           _idleClient = idleClient;
-          await idleClient.connectToServer(host, port, isSecure: true);
-          await idleClient.login(username, password);
+          await idleClient.connectToServer(host, port, isSecure: port == 993);
+          await idleClient.login(username, normalizePassword(password));
           await idleClient.selectInbox();
           _log('IDLE', 'Connected');
         }

@@ -118,9 +118,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
       setState(() {
         _testing = false;
         _testSuccess = ok;
-        _testError = ok
-            ? null
-            : 'Kết nối thất bại. Kiểm tra host/port/password.';
+        _testError = ok ? null : p.imapError ?? 'Ket noi that bai.';
       });
     } catch (e) {
       setState(() {
@@ -136,7 +134,10 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
       await p.stopImap();
     } else {
       await _saveConfig(p);
-      await p.startImap();
+      try {
+        await p.startImap();
+      } catch (_) {}
+
       if (p.imapError != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

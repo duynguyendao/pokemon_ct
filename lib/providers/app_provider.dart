@@ -23,6 +23,9 @@ class AppProvider extends ChangeNotifier {
   bool _proxyEnabled = false;
   bool _fakeBrowser = true;
   bool _loaded = false;
+  bool _imapStarting = false;
+  bool _imapStopping = false;
+  String? _imapError;
 
   final _otpController = StreamController<OtpEntry>.broadcast();
   StreamSubscription<OtpEntry>? _otpSub;
@@ -45,9 +48,9 @@ class AppProvider extends ChangeNotifier {
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
-  bool get imapStarting => false;
-  bool get imapStopping => false;
-  String? get imapError => null;
+  bool get imapStarting => _imapStarting;
+  bool get imapStopping => _imapStopping;
+  String? get imapError => _imapError;
 
   int get todoCount => _accounts.where((a) => a.status == 'todo').length;
   int get doneCount => _accounts.where((a) => a.status == 'done').length;
@@ -318,21 +321,98 @@ class AppProvider extends ChangeNotifier {
 
     if (host == null || user == null || pass == null) return;
 
-    await _imap.start(
-      host: host,
-      port: int.tryParse(portStr ?? '') ?? 993,
-      username: user,
-      password: pass,
-    );
+    _imapStarting = true;
+    _imapError = null;
+    notifyListeners();
+
+    try {
+      await _imap.start(
+        host: host,
+        port: int.tryParse(portStr ?? '') ?? 993,
+        username: user,
+        password: pass,
+      );
+    } catch (e) {
+      _imapError = _friendlyImapError(e);
+      rethrow;
+    } finally {
+      _imapStarting = false;
+      notifyListeners();
+    }
   }
 
   Future<void> stopImap() async {
-    await _imap.stop();
+    _imapStopping = true;
+    notifyListeners();
+
+    try {
+      await _imap.stop();
+    } finally {
+      _imapStopping = false;
+      notifyListeners();
+    }
   }
 
   Future<bool> testImapConnection() async {
-    // Stub - implement if needed
-    return false;
+    final host = _imapConfig['host']?.trim();
+    final portStr = _imapConfig['port']?.trim();
+    final user = _imapConfig['username']?.trim();
+    final pass = _imapConfig['password'];
+
+    if (host == null || host.isEmpty) {
+      _imapError = 'Host IMAP đang trống.';
+      notifyListeners();
+      return false;
+    }
+    if (user == null || user.isEmpty) {
+      _imapError = 'Email IMAP đang trống.';
+      notifyListeners();
+      return false;
+    }
+    if (pass == null || pass.trim().isEmpty) {
+      _imapError = 'App Password đang trống.';
+      notifyListeners();
+      return false;
+    }
+
+    _imapError = null;
+    notifyListeners();
+
+    try {
+      await _imap.testConnection(
+        host: host,
+        port: int.tryParse(portStr ?? '') ?? 993,
+        username: user,
+        password: pass,
+      );
+      return true;
+    } catch (e) {
+      _imapError = _friendlyImapError(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  String _friendlyImapError(Object error) {
+    final message = error.toString();
+    final lower = message.toLowerCase();
+
+    if (lower.contains('authentication') ||
+        lower.contains('login') ||
+        lower.contains('invalid credentials') ||
+        lower.contains('username and password not accepted')) {
+      return 'Đăng nhập IMAP thất bại. Với Gmail cần bật 2-Step Verification và dùng App Password 16 ký tự, không dùng mật khẩu Gmail thường.';
+    }
+    if (lower.contains('socket') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('network')) {
+      return 'Không kết nối được tới IMAP server. Kiểm tra mạng, host và port.';
+    }
+    if (lower.contains('certificate') || lower.contains('handshake')) {
+      return 'Lỗi SSL/TLS khi kết nối IMAP. Với Gmail dùng host imap.gmail.com và port 993.';
+    }
+
+    return message;
   }
 
   Future<List<OtpEntry>> fetchOtpNow() async => [];
