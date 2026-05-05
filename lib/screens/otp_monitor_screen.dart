@@ -606,6 +606,56 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
 
           const SizedBox(height: 16),
 
+          // Filter Rules
+          Row(
+            children: [
+              const Text(
+                'Quy tắc lọc OTP',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => _showRuleDialog(p),
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Thêm'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.divider),
+            ),
+            child: const Text(
+              '💡 Nếu không có quy tắc khớp, app sẽ tự tìm 6 số bất kỳ trong email.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ),
+          ...p.filterRules.map((rule) => _buildRuleTile(rule, p)),
+          if (p.filterRules.isEmpty)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Chưa có quy tắc nào. Dùng fallback 6-digit.',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 16),
+
           // URL Settings
           _sectionCard(
             title: '🔗 Cài đặt đường dẫn',
@@ -679,7 +729,6 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     );
   }
 
-  // ignore: unused_element
   Widget _buildRuleTile(FilterRule rule, AppProvider p) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),

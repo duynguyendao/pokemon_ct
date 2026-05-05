@@ -791,7 +791,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 onPressed: () => setState(() => _stopAllRequested = true),
                 icon: const Icon(Icons.stop, size: 18),
-                label: const Text('Stop All', style: TextStyle(fontSize: 12)),
+                label: const Text('Stop', style: TextStyle(fontSize: 12)),
               ),
             ),
           ] else if (_batchMode) ...[

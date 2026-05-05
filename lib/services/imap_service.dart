@@ -1,8 +1,5 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:enough_mail/enough_mail.dart';
-// ignore: implementation_imports
-import 'package:enough_mail/src/private/util/client_base.dart';
 import '../models/otp_entry.dart';
 import 'debug_service.dart';
 
@@ -43,46 +40,6 @@ class _IdleNewMail {
   }
 }
 
-class _TurboImapClient extends ImapClient {
-  Completer<ConnectionInfo>? _connectionReady;
-
-  Future<ConnectionInfo> connectSocketAndWait(
-    Socket socket,
-    ConnectionInfo connectionInfo,
-    Duration timeout,
-  ) {
-    _connectionReady = Completer<ConnectionInfo>();
-    connect(socket, connectionInformation: connectionInfo);
-    return _connectionReady!.future.timeout(timeout);
-  }
-
-  @override
-  FutureOr<void> onConnectionEstablished(
-    ConnectionInfo connectionInfo,
-    String serverGreeting,
-  ) {
-    final result = super.onConnectionEstablished(
-      connectionInfo,
-      serverGreeting,
-    );
-    Future.sync(() => result).then(
-      (_) {
-        final ready = _connectionReady;
-        if (ready != null && !ready.isCompleted) {
-          ready.complete(connectionInfo);
-        }
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        final ready = _connectionReady;
-        if (ready != null && !ready.isCompleted) {
-          ready.completeError(error, stackTrace);
-        }
-      },
-    );
-    return result;
-  }
-}
-
 class ImapService {
   static const _connectTimeout = Duration(seconds: 6);
 
@@ -111,7 +68,7 @@ class ImapService {
     required String username,
     required String password,
   }) async {
-    final client = _TurboImapClient();
+    final client = ImapClient();
 
     try {
       await _connectClient(client, host, port, username, password);
@@ -138,7 +95,7 @@ class ImapService {
     DateTime? to,
     int maxMessages = 20,
   }) async {
-    final client = _TurboImapClient();
+    final client = ImapClient();
 
     try {
       await _connectClient(client, host, port, username, password);
@@ -241,7 +198,7 @@ class ImapService {
     int maxMessages = 3,
     Duration maxAge = const Duration(minutes: 2),
   }) async {
-    final client = _TurboImapClient();
+    final client = ImapClient();
     final stopwatch = Stopwatch()..start();
 
     try {
@@ -397,7 +354,7 @@ class ImapService {
 
     try {
       await idleClient.idleStart();
-      await Future.any([newMail.future, Future.delayed(Duration(seconds: 20))]);
+      await Future.any([newMail.future, Future.delayed(Duration(seconds: 8))]);
     } finally {
       await subscription.cancel();
       try {
@@ -446,7 +403,7 @@ class ImapService {
     }
 
     await _disconnectClient();
-    final client = _TurboImapClient();
+    final client = ImapClient();
     _client = client;
     _log('RECONNECT', 'Connecting...');
     await _connectClient(client, host, port, username, password);
@@ -549,15 +506,12 @@ class ImapService {
   ) async {
     final stopwatch = Stopwatch()..start();
 
-    final connectedViaIpv4 = await _tryConnectViaIpv4(client, host, port);
-    if (!connectedViaIpv4) {
-      await client.connectToServer(
-        host,
-        port,
-        isSecure: port == 993,
-        timeout: _connectTimeout,
-      );
-    }
+    await client.connectToServer(
+      host,
+      port,
+      isSecure: port == 993,
+      timeout: _connectTimeout,
+    );
     _log('CONNECT', 'Socket ready in ${stopwatch.elapsedMilliseconds}ms');
 
     await client.login(username, normalizePassword(password));
@@ -567,76 +521,6 @@ class ImapService {
     _lastExists = inbox.messagesExists;
     _log('CONNECT', 'INBOX selected in ${stopwatch.elapsedMilliseconds}ms');
     return inbox;
-  }
-
-  Future<bool> _tryConnectViaIpv4(
-    ImapClient client,
-    String host,
-    int port,
-  ) async {
-    if (!Platform.isIOS || client is! _TurboImapClient) {
-      return false;
-    }
-
-    List<InternetAddress> addresses;
-    try {
-      final dnsStopwatch = Stopwatch()..start();
-      addresses = await InternetAddress.lookup(
-        host,
-        type: InternetAddressType.IPv4,
-      ).timeout(const Duration(seconds: 2));
-      _log(
-        'DNS',
-        'IPv4 lookup found ${addresses.length} in ${dnsStopwatch.elapsedMilliseconds}ms',
-      );
-    } catch (e) {
-      _log('DNS', 'IPv4 lookup failed, using default connect: $e');
-      return false;
-    }
-
-    for (final address in addresses.take(2)) {
-      Socket? rawSocket;
-      Socket? connectedSocket;
-      try {
-        final socketStopwatch = Stopwatch()..start();
-        rawSocket = await Socket.connect(
-          address,
-          port,
-          timeout: _connectTimeout,
-        );
-
-        final Socket socket;
-        if (port == 993) {
-          socket = await SecureSocket.secure(
-            rawSocket,
-            host: host,
-          ).timeout(_connectTimeout);
-          rawSocket = null;
-        } else {
-          socket = rawSocket;
-          rawSocket = null;
-        }
-        connectedSocket = socket;
-
-        await client.connectSocketAndWait(
-          socket,
-          ConnectionInfo(host, port, isSecure: port == 993),
-          _connectTimeout,
-        );
-        _log(
-          'DNS',
-          'Connected via IPv4 ${address.address} in ${socketStopwatch.elapsedMilliseconds}ms',
-        );
-        return true;
-      } catch (e) {
-        connectedSocket?.destroy();
-        rawSocket?.destroy();
-        _log('DNS', 'IPv4 ${address.address} failed: $e');
-      }
-    }
-
-    _log('DNS', 'All IPv4 attempts failed, using default connect');
-    return false;
   }
 
   Future<bool> _trySelectMailbox(ImapClient client, String mailbox) async {
