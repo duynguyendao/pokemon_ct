@@ -43,6 +43,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _autoFilling = false;
   String? _lastAutoFillUrl;
 
+  // Smart DOM wait completers
+  final Map<String, Completer<void>> _domWaitCompleters = {};
+
   // OTP auto-submit
   bool _otpAutoSubmitting = false;
   String? _lastOtpPageUrl; // tránh trigger lại cùng một URL
@@ -150,10 +153,58 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _showStatusOverlay(text);
   }
 
+  // Polls JS until one of [selectors] is found in DOM, or [timeout] ms passes.
+  // Uses FlutterChannel with key "__domWait_<token>" to resolve.
+  Future<void> _waitForElement(
+    List<String> selectors, {
+    int timeout = 3000,
+    int pollInterval = 100,
+  }) async {
+    final token = DateTime.now().microsecondsSinceEpoch.toString();
+    final completer = Completer<void>();
+    _domWaitCompleters[token] = completer;
+
+    final selectorsJs = selectors.map((s) => '"${s.replaceAll('"', '\\"')}"').join(',');
+    await _controller.runJavaScript('''
+(function() {
+  var token = "$token";
+  var selectors = [$selectorsJs];
+  var maxMs = $timeout;
+  var interval = $pollInterval;
+  var elapsed = 0;
+  function check() {
+    for (var i = 0; i < selectors.length; i++) {
+      if (document.querySelector(selectors[i])) {
+        window.FlutterChannel.postMessage('{"type":"domReady","token":"' + token + '"}');
+        return;
+      }
+    }
+    elapsed += interval;
+    if (elapsed < maxMs) {
+      setTimeout(check, interval);
+    } else {
+      window.FlutterChannel.postMessage('{"type":"domReady","token":"' + token + '"}');
+    }
+  }
+  check();
+})();
+''');
+
+    await completer.future.timeout(
+      Duration(milliseconds: timeout + 500),
+      onTimeout: () {},
+    );
+    _domWaitCompleters.remove(token);
+  }
+
   @override
   void dispose() {
     _statusOverlay?.remove();
     _statusOverlay = null;
+    for (final c in _domWaitCompleters.values) {
+      if (!c.isCompleted) c.complete();
+    }
+    _domWaitCompleters.clear();
     super.dispose();
   }
 
@@ -221,12 +272,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
             // Auto-fill email + password trên trang login
             if (_isLoginPage(url) && _lastAutoFillUrl != url && !_autoFilling) {
               _lastAutoFillUrl = url;
-              await Future.delayed(const Duration(milliseconds: 700));
+              await _waitForElement([
+                'input[type="email"]',
+                'input[name="email"]',
+                'input[name="loginEmail"]',
+                'input[id*="email"]',
+              ], timeout: 3000);
               await _autoFill(silent: true);
             }
 
             // Dùng JS để phát hiện field OTP — không phụ thuộc vào URL
-            await Future.delayed(const Duration(milliseconds: 800));
+            await _waitForElement([
+              'input#authCode',
+              'input[name="dwfrm_factor2Auth_authCode"]',
+              'input[name="passcode"]',
+              'input[maxlength="6"]',
+              'body',
+            ], timeout: 2000);
             if (mounted) {
               await _controller.runJavaScript(_detectOtpFieldJs);
             }
@@ -244,6 +306,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _handleJsMessage(String message) {
+    // DOM element ready signal → resolve pending completer
+    if (message.contains('"type":"domReady"')) {
+      final tokenMatch = RegExp(r'"token":"([^"]+)"').firstMatch(message);
+      if (tokenMatch != null) {
+        final token = tokenMatch.group(1)!;
+        _domWaitCompleters[token]?.complete();
+      }
+      return;
+    }
+
     // OTP field phát hiện → auto submit
     if (message.contains('"type":"otpField"') &&
         message.contains('"detected":true')) {
@@ -445,12 +517,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
     setState(() => _autoFilling = true);
     _setStatus('📧 Điền email + password...');
     try {
-      await Future.delayed(const Duration(milliseconds: 300));
+      await _waitForElement([
+        'input[type="email"]',
+        'input[name="email"]',
+        'input[name="loginEmail"]',
+        'input[id*="email"]',
+      ], timeout: 3000);
       await _controller.runJavaScript(
         buildAutoFillScript(widget.account.email, widget.account.password),
       );
       _setStatus('🔐 Đang login...');
-      await Future.delayed(const Duration(milliseconds: 700));
+      await _waitForElement([
+        'a.loginBtn',
+        'button[type="submit"]',
+        'input[type="submit"]',
+        'a[role="button"]',
+      ], timeout: 2000);
 
       // Ghi lại thời điểm bấm ログイン — chỉ nhận OTP từ sau thời điểm này
       _loginAttemptTime = DateTime.now();
@@ -472,7 +554,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 })();
 ''');
-      await Future.delayed(const Duration(seconds: 2));
+      // Chờ browser navigate hoặc OTP field xuất hiện (tối đa 3s)
+      await _waitForElement([
+        'input#authCode',
+        'input[name="dwfrm_factor2Auth_authCode"]',
+        'input[name="passcode"]',
+        'input[maxlength="6"]',
+      ], timeout: 3000);
       if (mounted) _setStatus('');
     } catch (_) {
       if (mounted) _setStatus('');
