@@ -252,10 +252,39 @@ DeviceProfile randomProfile() {
 
 String buildAntiFingerprintScript(DeviceProfile p) {
   final langs = p.languages.map((l) => '"$l"').join(', ');
-  // Random canvas noise seed per session
   final noiseSeed = _rng.nextInt(0xFFFF);
-  // Slightly randomize screen availHeight (status bar varies 40-60px)
   final availH = p.screenHeight - 40 - _rng.nextInt(20);
+
+  // Safari/iOS profile vs Chrome/Android profile — nhiều thứ khác nhau hoàn toàn
+  final isSafari = p.userAgent.contains('Safari') && !p.userAgent.contains('Chrome');
+  // appVersion = phần sau "Mozilla/" trong UA
+  final appVersion = p.userAgent.startsWith('Mozilla/')
+      ? p.userAgent.substring('Mozilla/'.length)
+      : '5.0 (Mobile)';
+
+  // Chrome profiles: plugins có PDF Viewer; Safari iOS: PluginArray rỗng
+  final pluginsJs = isSafari
+      ? 'def(nav, "plugins", Object.freeze([]));'
+      : '''def(nav, 'plugins', Object.freeze([
+      { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', suffixes: 'pdf' },
+      { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', suffixes: 'pdf' },
+      { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', suffixes: 'pdf' },
+    ]));''';
+
+  // Safari không có window.chrome; Chrome cần nó
+  final chromeJs = isSafari
+      ? '''try { delete window.chrome; } catch(e) {}
+    Object.defineProperty(window, 'chrome', { get: () => undefined, configurable: true, enumerable: false });'''
+      : '''window.chrome = {
+      runtime: { id: undefined, connect: function(){}, sendMessage: function(){} },
+      loadTimes: function(){},
+      csi: function(){ return {startE: Date.now(), onloadT: Date.now(), pageT: 1.0, tran: 15}; },
+    };''';
+
+  // Safari iOS có navigator.standalone; Chrome không có
+  final standaloneJs = isSafari
+      ? 'def(nav, "standalone", false);'
+      : '';
 
   return '''
 (function() {
@@ -263,7 +292,6 @@ String buildAntiFingerprintScript(DeviceProfile p) {
   window.__fpPatched = true;
 
   try {
-    // ── 1. navigator overrides ─────────────────────────────────────────────
     const nav = navigator;
 
     function def(obj, prop, val) {
@@ -276,20 +304,24 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       } catch(e) {}
     }
 
+    // ── 1. navigator ───────────────────────────────────────────────────────
     def(nav, 'platform',            '${p.platform}');
     def(nav, 'vendor',              '${p.vendor}');
     def(nav, 'userAgent',           '${p.userAgent}');
-    def(nav, 'appVersion',          '5.0 (Mobile)');
+    def(nav, 'appVersion',          '$appVersion');
+    def(nav, 'appName',             'Netscape');
+    def(nav, 'product',             'Gecko');
     def(nav, 'hardwareConcurrency', ${p.hardwareConcurrency});
     def(nav, 'deviceMemory',        ${p.deviceMemory});
     def(nav, 'language',            '${p.languages.first}');
     def(nav, 'languages',           Object.freeze([$langs]));
     def(nav, 'maxTouchPoints',      ${p.maxTouchPoints});
     def(nav, 'doNotTrack',          null);
-
-    // Remove automation flags
+    def(nav, 'cookieEnabled',       true);
+    def(nav, 'onLine',              true);
     def(nav, 'webdriver',           false);
     try { delete nav.__proto__.webdriver; } catch(e) {}
+    $standaloneJs
 
     // ── 2. screen ──────────────────────────────────────────────────────────
     def(screen, 'width',       ${p.screenWidth});
@@ -317,7 +349,7 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         };
       });
 
-    // ── 4. Canvas noise (per-session seed) ────────────────────────────────
+    // ── 4. Canvas noise ────────────────────────────────────────────────────
     const SEED = $noiseSeed;
     function lcg(s) { return (s * 1664525 + 1013904223) & 0xffffffff; }
 
@@ -353,7 +385,7 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       }
     })();
 
-    // ── 5. AudioContext fingerprint ────────────────────────────────────────
+    // ── 5. AudioContext ────────────────────────────────────────────────────
     (function patchAudio() {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
@@ -362,14 +394,11 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         const osc = origCreate.call(this);
         const origConnect = osc.connect.bind(osc);
         osc.connect = function(dest) {
-          // tiny pitch shift to change hash
           if (osc.frequency) osc.frequency.value += 0.0001;
           return origConnect(dest);
         };
         return osc;
       };
-
-      // Randomise sampleRate slightly
       Object.defineProperty(AudioCtx.prototype, 'sampleRate', {
         get: function() { return ${p.audioSampleRate} + (SEED % 3); },
         configurable: true,
@@ -385,32 +414,28 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         return new origDTF(locale, opts);
       };
       Intl.DateTimeFormat.prototype = origDTF.prototype;
-
-      const origGetOffset = Date.prototype.getTimezoneOffset;
-      Date.prototype.getTimezoneOffset = function() {
-        return ${p.timezoneOffset};
-      };
+      Date.prototype.getTimezoneOffset = function() { return ${p.timezoneOffset}; };
     })();
 
     // ── 7. Network & battery ───────────────────────────────────────────────
-    def(nav, 'connection', {
-      effectiveType: '4g',
-      downlink: 8 + (SEED % 5),
-      rtt: 40 + (SEED % 30),
-      saveData: false,
-      type: 'wifi',
-    });
+    if (nav.connection) {
+      def(nav, 'connection', {
+        effectiveType: '4g',
+        downlink: 8 + (SEED % 5),
+        rtt: 40 + (SEED % 30),
+        saveData: false,
+        type: 'wifi',
+      });
+    }
 
     if (!nav.getBattery) {
       nav.getBattery = () => Promise.resolve({
-        charging: true,
-        chargingTime: 0,
-        dischargingTime: Infinity,
+        charging: true, chargingTime: 0, dischargingTime: Infinity,
         level: 0.8 + (SEED % 20) / 100,
       });
     }
 
-    // ── 8. Permissions API (prevent "denied" automation leak) ──────────────
+    // ── 8. Permissions ─────────────────────────────────────────────────────
     if (navigator.permissions) {
       const origQuery = navigator.permissions.query.bind(navigator.permissions);
       navigator.permissions.query = function(desc) {
@@ -421,17 +446,30 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       };
     }
 
-    // ── 9. Remove Chrome automation markers ───────────────────────────────
+    // ── 9. chrome object — Safari không có, Chrome cần có ─────────────────
     try { delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array; } catch(e) {}
     try { delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise; } catch(e) {}
     try { delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol; } catch(e) {}
-    window.chrome = { runtime: {}, app: {}, webstore: {} };
+    $chromeJs
 
-    // ── 10. Plugins (non-empty) ────────────────────────────────────────────
-    def(nav, 'plugins', Object.freeze([
-      { name: 'PDF Viewer',         filename: 'internal-pdf-viewer' },
-      { name: 'Chrome PDF Viewer',  filename: 'internal-pdf-viewer' },
-    ]));
+    // ── 10. Plugins — Safari iOS: rỗng; Chrome: PDF Viewer ────────────────
+    $pluginsJs
+
+    // ── 11. Color gamut (media query) ──────────────────────────────────────
+    (function patchColorGamut() {
+      const origMQ = window.matchMedia;
+      if (!origMQ) return;
+      window.matchMedia = function(query) {
+        const result = origMQ.call(window, query);
+        if (query.includes('color-gamut')) {
+          const gamut = '${p.colorGamut}';
+          const matches = (gamut === 'p3' && query.includes('p3')) ||
+                          (gamut === 'srgb' && query.includes('srgb'));
+          Object.defineProperty(result, 'matches', { get: () => matches });
+        }
+        return result;
+      };
+    })();
 
   } catch(e) {}
 })();
