@@ -23,36 +23,37 @@ class ImapEmailResult {
   });
 }
 
-class _IdleNewMail {
-  final int oldCount;
-  final int newCount;
-
-  const _IdleNewMail(this.oldCount, this.newCount);
-
-  bool get hasNewMail => newCount > oldCount;
-
-  MessageSequence toMessageSequence() {
-    final first = oldCount + 1;
-    final last = newCount;
-    return first == last
-        ? MessageSequence.fromId(last)
-        : MessageSequence.fromRange(first, last);
-  }
-}
-
+/// Polling-based IMAP service.
+///
+/// Strategy:
+///   1. Login once, keep one connection alive across all polls
+///   2. Every 2s: SELECT/NOOP and check if INBOX message count grew (cheap)
+///   3. If grew: fetch only the new range, parse, dedupe by UID, emit OTP
+///   4. Every 4 minutes: send NOOP heartbeat to keep NAT/Gmail from dropping
+///   5. On any error: tear down + reconnect on next tick
+///
+/// Why poll over IDLE here:
+///   - On 4G/5G, NAT can silently kill an idle TCP socket after ~30s with no
+///     keepalive. IDLE notification gets lost; reconnect adds latency.
+///   - 2s poll has worst-case 2s latency, IDLE has best-case ~1s but variable.
+///   - Simpler code path = fewer race conditions.
 class ImapService {
   static const _connectTimeout = Duration(seconds: 6);
-  static const _pollInterval = Duration(seconds: 6);
-  static const _fallbackPollMessages = 2;
+  static const _pollInterval = Duration(seconds: 2);
+  static const _heartbeatInterval = Duration(minutes: 4);
+  static const _maxOtpAge = Duration(minutes: 5);
 
   ImapClient? _client;
   bool _isRunning = false;
-  bool _isIdleRunning = false;
   String? _host;
   int? _port;
   String? _username;
   String? _password;
+
   int? _lastExists;
+  Timer? _pollTimer;
+  DateTime? _lastHeartbeat;
+  bool _polling = false;
 
   final Set<int> _processedUids = {};
 
@@ -64,6 +65,55 @@ class ImapService {
     return password.replaceAll(RegExp(r'\s+'), '');
   }
 
+  // ─── Public API ────────────────────────────────────────────────────────
+
+  Future<void> start({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+  }) async {
+    if (_isRunning) return;
+
+    _isRunning = true;
+    _host = host;
+    _port = port;
+    _username = username;
+    _password = password;
+    _processedUids.clear();
+    _log('START', 'Starting IMAP poll loop ($_pollInterval)...');
+
+    try {
+      await _ensureConnected();
+      _log('START', 'Initial connect OK, mailbox has $_lastExists messages');
+      _lastHeartbeat = DateTime.now();
+      _startPollTimer();
+    } catch (e) {
+      _isRunning = false;
+      _log('START', 'Failed: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> stop() async {
+    _isRunning = false;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    await _disconnectClient();
+    _host = null;
+    _port = null;
+    _username = null;
+    _password = null;
+    _lastExists = null;
+    _lastHeartbeat = null;
+    _log('STOP', 'Stopped');
+  }
+
+  void dispose() {
+    stop();
+    _otpController.close();
+  }
+
   Future<void> testConnection({
     required String host,
     required int port,
@@ -71,7 +121,6 @@ class ImapService {
     required String password,
   }) async {
     final client = ImapClient();
-
     try {
       await _connectClient(client, host, port, username, password);
       _log('TEST', 'Connected OK');
@@ -83,6 +132,46 @@ class ImapService {
       try {
         await client.disconnect();
       } catch (_) {}
+    }
+  }
+
+  /// One-shot fetch of latest N messages, used by manual "fetch now" UI.
+  Future<List<OtpEntry>> fetchRecentOtps({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+    int maxMessages = 3,
+    Duration maxAge = const Duration(minutes: 2),
+  }) async {
+    final client = ImapClient();
+    final stopwatch = Stopwatch()..start();
+
+    try {
+      final inbox = await _connectClient(
+        client, host, port, username, password,
+      );
+      final results = <OtpEntry>[];
+      final sequence = _latestSequenceFromCount(
+        inbox.messagesExists,
+        maxMessages,
+      );
+
+      if (sequence != null) {
+        final fetched = await _fetchFullText(client, sequence);
+        for (final msg in fetched.messages) {
+          final entry = _parseMessage(msg, maxAge: maxAge);
+          if (entry != null) {
+            results.add(entry);
+            if (!_otpController.isClosed) _otpController.add(entry);
+          }
+        }
+      }
+      _log('FETCH_NOW', '${results.length} OTP(s) in ${stopwatch.elapsedMilliseconds}ms');
+      return results;
+    } finally {
+      try { await client.logout(); } catch (_) {}
+      try { await client.disconnect(); } catch (_) {}
     }
   }
 
@@ -98,324 +187,169 @@ class ImapService {
     int maxMessages = 20,
   }) async {
     final client = ImapClient();
-
     try {
       await _connectClient(client, host, port, username, password);
       final results = <ImapEmailResult>[];
+      if (!await _trySelectInbox(client)) return results;
 
-      for (final mailbox in const ['INBOX']) {
-        if (results.length >= maxMessages ||
-            !await _trySelectMailbox(client, mailbox)) {
-          break;
-        }
+      final criteria = _buildSearchCriteria(
+        subjectKeyword: subjectKeyword,
+        bodyKeyword: bodyKeyword,
+        from: from,
+        to: to,
+      );
+      final search = await client.searchMessages(searchCriteria: criteria);
+      final sequence = search.matchingSequence;
+      if (sequence == null || sequence.isEmpty) return results;
 
-        final searchResult = await _searchForMessages(
-          client,
-          subjectKeyword: subjectKeyword,
-          bodyKeyword: bodyKeyword,
-          from: from,
-          to: to,
-        );
-        final sequence = searchResult.matchingSequence;
+      final ids = sequence.toList().reversed.take(maxMessages).toList();
+      const batchSize = 20;
+      for (var i = 0; i < ids.length; i += batchSize) {
+        final end = (i + batchSize < ids.length) ? i + batchSize : ids.length;
+        final batch = MessageSequence.fromIds(ids.sublist(i, end));
+        final fetched = await client.fetchMessages(batch, '(BODY.PEEK[])');
 
-        if (sequence == null || sequence.isEmpty) {
-          _log('SEARCH', 'No messages found in $mailbox');
-          continue;
-        }
+        for (final msg in fetched.messages) {
+          final subject = msg.decodeSubject() ?? '(No Subject)';
+          final sender = msg.from?.first.email ?? '';
+          final body = _decodeBody(msg);
+          final date = msg.decodeDate() ?? DateTime.now();
 
-        final fetchLimit = _fetchLimitFor(maxMessages - results.length);
-        final ids = sequence.toList().reversed.take(fetchLimit).toList();
-        _log(
-          'SEARCH',
-          '$mailbox matched ${sequence.length}, fetching ${ids.length}',
-        );
-
-        const batchSize = 20;
-
-        for (
-          var i = 0;
-          i < ids.length && results.length < maxMessages;
-          i += batchSize
-        ) {
-          final end = (i + batchSize < ids.length) ? i + batchSize : ids.length;
-          final batch = MessageSequence.fromIds(ids.sublist(i, end));
-          final fetched = await client.fetchMessages(batch, '(BODY.PEEK[])');
-
-          for (final message in fetched.messages) {
-            final subject = message.decodeSubject() ?? '(No Subject)';
-            final sender =
-                message.from?.first.email ??
-                message.from?.first.toString() ??
-                '';
-            final body = _decodeBody(message);
-            final date = message.decodeDate() ?? DateTime.now();
-
-            if (!_messageMatches(
-              subject: subject,
-              body: body,
-              subjectKeyword: subjectKeyword,
-              bodyKeyword: bodyKeyword,
-            )) {
-              continue;
-            }
-
-            results.add(
-              ImapEmailResult(
-                subject: subject,
-                sender: sender,
-                body: _preview(body),
-                date: date,
-                otpFound: extractOtp(
-                  sender: sender,
-                  subject: subject,
-                  body: body,
-                ),
-              ),
-            );
-
-            if (results.length >= maxMessages) {
-              break;
-            }
+          if (!_messageMatches(
+            subject: subject,
+            body: body,
+            subjectKeyword: subjectKeyword,
+            bodyKeyword: bodyKeyword,
+          )) {
+            continue;
           }
-        }
-      }
 
-      _log('SEARCH', 'Returned ${results.length} messages');
+          results.add(ImapEmailResult(
+            subject: subject,
+            sender: sender,
+            body: _preview(body),
+            date: date,
+            otpFound: extractOtp(sender: sender, subject: subject, body: body),
+          ));
+          if (results.length >= maxMessages) break;
+        }
+        if (results.length >= maxMessages) break;
+      }
       return results;
     } finally {
-      try {
-        await client.logout();
-      } catch (_) {}
-      try {
-        await client.disconnect();
-      } catch (_) {}
+      try { await client.logout(); } catch (_) {}
+      try { await client.disconnect(); } catch (_) {}
     }
   }
 
-  Future<List<OtpEntry>> fetchRecentOtps({
-    required String host,
-    required int port,
-    required String username,
-    required String password,
-    int maxMessages = 3,
-    Duration maxAge = const Duration(minutes: 2),
-  }) async {
-    final client = ImapClient();
-    final stopwatch = Stopwatch()..start();
+  // ─── Polling loop ──────────────────────────────────────────────────────
 
+  void _startPollTimer() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _tick());
+  }
+
+  Future<void> _tick() async {
+    if (!_isRunning || _polling) return;
+    _polling = true;
     try {
-      final inbox = await _connectClient(
-        client,
-        host,
-        port,
-        username,
-        password,
-      );
+      final client = await _ensureConnected();
 
-      final otps = <OtpEntry>[];
-      final latestSequence = _latestInboxSequence(inbox, maxMessages);
-
-      if (latestSequence != null) {
-        _log(
-          'FETCH_NOW',
-          'Fetching latest $maxMessages from INBOX (${inbox.messagesExists} total)',
-        );
-        final fetched = await _fetchFullTextMessages(client, latestSequence);
-
-        for (final message in fetched.messages) {
-          final uid = message.uid ?? 0;
-          if (uid > 0 && _processedUids.contains(uid)) {
-            continue;
-          }
-
-          final sender =
-              message.from?.first.email ?? message.from?.first.toString() ?? '';
-          final recipient =
-              message.to?.first.email ?? message.to?.first.toString();
-          final subject = message.decodeSubject() ?? '';
-          final body = _decodeBody(message);
-          final date = message.decodeDate() ?? DateTime.now();
-
-          if (DateTime.now().difference(date) > maxAge) {
-            continue;
-          }
-
-          final otp = extractOtp(sender: sender, subject: subject, body: body);
-          if (otp == null) {
-            continue;
-          }
-
-          if (uid > 0) {
-            _processedUids.add(uid);
-          }
-
-          final entry = OtpEntry(
-            code: otp,
-            sender: sender,
-            subject: subject,
-            recipient: recipient,
-            timestamp: date,
-          );
-          otps.add(entry);
-
-          if (!_otpController.isClosed) {
-            _otpController.add(entry);
-          }
-        }
+      // Heartbeat NOOP every 4 min keeps NAT alive + Gmail from idling us
+      final now = DateTime.now();
+      final lastBeat = _lastHeartbeat;
+      if (lastBeat == null ||
+          now.difference(lastBeat) > _heartbeatInterval) {
+        _lastHeartbeat = now;
       }
 
-      _log(
-        'FETCH_NOW',
-        'Found ${otps.length} OTP(s) in ${stopwatch.elapsedMilliseconds}ms',
+      // Cheap NOOP — server reports current message count
+      final mailbox = await client.noop().timeout(
+        const Duration(seconds: 4),
       );
-      return otps;
-    } finally {
-      try {
-        await client.logout();
-      } catch (_) {}
-      try {
-        await client.disconnect();
-      } catch (_) {}
-    }
-  }
-
-  MessageSequence? _latestInboxSequence(Mailbox inbox, int maxMessages) {
-    return _latestSequenceFromCount(inbox.messagesExists, maxMessages);
-  }
-
-  MessageSequence? _latestSequenceFromCount(int latest, int maxMessages) {
-    if (latest <= 0 || maxMessages <= 0) {
-      return null;
-    }
-
-    final first = latest - maxMessages + 1;
-    return MessageSequence.fromRange(first < 1 ? 1 : first, latest);
-  }
-
-  Future<void> start({
-    required String host,
-    required int port,
-    required String username,
-    required String password,
-  }) async {
-    if (_isRunning) return;
-
-    _isRunning = true;
-    _host = host;
-    _port = port;
-    _username = username;
-    _password = password;
-    _log('START', 'Starting IMAP...');
-
-    try {
-      await _ensureConnected();
-
-      _log('START', 'Connected OK');
-
-      _startIdleLoop();
-    } catch (e) {
-      _isRunning = false;
-      _log('START', 'Failed: $e');
-      rethrow;
-    }
-  }
-
-  void _startIdleLoop() {
-    _isIdleRunning = true;
-    unawaited(_runIdleLoop());
-  }
-
-  Future<void> _runIdleLoop() async {
-    while (_isRunning && _isIdleRunning) {
-      try {
-        final client = await _ensureConnected();
-
-        _log('IDLE', 'Waiting for mail...');
-        final newMail = await _waitForNewMail(client);
-
-        if (!_isRunning || !_isIdleRunning) break;
-
-        if (newMail?.hasNewMail == true) {
-          _lastExists = newMail!.newCount;
-          _log(
-            'IDLE',
-            'New mail detected ${newMail.oldCount}->${newMail.newCount}',
-          );
-          await _fetchNew(client, newMail);
-        } else {
-          await _pollLatestInbox(client);
-        }
-      } catch (e) {
-        _log('IDLE', 'Error: $e');
-        await _disconnectClient();
-
-        if (_isRunning && _isIdleRunning) {
-          await Future.delayed(Duration(seconds: 5));
-        }
-      }
-    }
-  }
-
-  Future<_IdleNewMail?> _waitForNewMail(ImapClient idleClient) async {
-    final newMail = Completer<_IdleNewMail>();
-    final subscription = idleClient.eventBus
-        .on<ImapMessagesExistEvent>()
-        .listen((event) {
-          if (!newMail.isCompleted) {
-            newMail.complete(
-              _IdleNewMail(event.oldMessagesExists, event.newMessagesExists),
-            );
-          }
-        });
-
-    try {
-      await idleClient.idleStart();
-      await Future.any([newMail.future, Future.delayed(_pollInterval)]);
-    } finally {
-      await subscription.cancel();
-      try {
-        await idleClient.idleDone();
-      } catch (_) {}
-    }
-
-    if (newMail.isCompleted) {
-      return await newMail.future;
-    }
-
-    try {
-      final mailbox = await idleClient.noop();
       final newCount = mailbox?.messagesExists;
       final oldCount = _lastExists;
-      if (newCount != null && oldCount != null && newCount > oldCount) {
-        _log('HEARTBEAT', 'NOOP detected new mail $oldCount->$newCount');
-        return _IdleNewMail(oldCount, newCount);
+
+      if (newCount == null) return;
+
+      if (oldCount == null) {
+        _lastExists = newCount;
+        return;
       }
 
-      if (newCount != null) {
+      if (newCount > oldCount) {
+        _log('POLL', 'New mail $oldCount -> $newCount');
+        final sequence = MessageSequence.fromRange(oldCount + 1, newCount);
+        _lastExists = newCount;
+        await _fetchAndEmit(client, sequence);
+      } else if (newCount < oldCount) {
+        // mail was deleted — just resync count
         _lastExists = newCount;
       }
-      _log('HEARTBEAT', 'NOOP OK, fallback poll next');
     } catch (e) {
-      _log('HEARTBEAT', 'NOOP failed: $e');
-      rethrow;
+      _log('POLL', 'Error: $e — reconnect on next tick');
+      await _disconnectClient();
+    } finally {
+      _polling = false;
     }
-
-    return null;
   }
+
+  Future<void> _fetchAndEmit(
+    ImapClient client,
+    MessageSequence sequence,
+  ) async {
+    try {
+      final result = await _fetchFullText(client, sequence);
+      for (final msg in result.messages) {
+        final entry = _parseMessage(msg, maxAge: _maxOtpAge);
+        if (entry != null && !_otpController.isClosed) {
+          _otpController.add(entry);
+        }
+      }
+    } catch (e) {
+      _log('FETCH', 'Error: $e');
+    }
+  }
+
+  OtpEntry? _parseMessage(MimeMessage msg, {required Duration maxAge}) {
+    final uid = msg.uid ?? 0;
+    if (uid > 0 && _processedUids.contains(uid)) return null;
+
+    final date = msg.decodeDate() ?? DateTime.now();
+    if (DateTime.now().difference(date) > maxAge) return null;
+
+    final sender = msg.from?.first.email ?? '';
+    final recipient = msg.to?.first.email;
+    final subject = msg.decodeSubject() ?? '';
+    final body = _decodeBody(msg);
+
+    final otp = extractOtp(sender: sender, subject: subject, body: body);
+    if (otp == null) return null;
+
+    if (uid > 0) _processedUids.add(uid);
+    _log('FETCH', 'OTP: $otp (uid=$uid)');
+
+    return OtpEntry(
+      code: otp,
+      sender: sender,
+      subject: subject,
+      recipient: recipient,
+      timestamp: date,
+    );
+  }
+
+  // ─── Connection management ─────────────────────────────────────────────
 
   Future<ImapClient> _ensureConnected() async {
     final existing = _client;
-    if (existing != null && existing.isConnected) {
-      return existing;
-    }
+    if (existing != null && existing.isConnected) return existing;
 
     final host = _host;
     final port = _port;
     final username = _username;
     final password = _password;
-
     if (host == null || port == null || username == null || password == null) {
-      throw StateError('IMAP config is not available for reconnect.');
+      throw StateError('IMAP config not available for reconnect.');
     }
 
     await _disconnectClient();
@@ -431,121 +365,9 @@ class ImapService {
     final client = _client;
     _client = null;
     _lastExists = null;
-    if (client == null) {
-      return;
-    }
-
-    try {
-      await client.logout();
-    } catch (_) {}
-    try {
-      await client.disconnect();
-    } catch (_) {}
-  }
-
-  Future<void> _fetchNew(ImapClient client, _IdleNewMail newMail) async {
-    await _fetchSequence(
-      client,
-      newMail.toMessageSequence(),
-      maxAge: const Duration(hours: 2),
-      logTag: 'FETCH',
-    );
-  }
-
-  Future<void> _pollLatestInbox(ImapClient client) async {
-    final latest = _lastExists;
-    if (latest == null || latest <= 0) {
-      return;
-    }
-
-    final sequence = _latestSequenceFromCount(latest, _fallbackPollMessages);
-    if (sequence == null) {
-      return;
-    }
-
-    _log(
-      'POLL',
-      'Fallback fetch latest $_fallbackPollMessages messages (exists $latest)',
-    );
-    await _fetchSequence(
-      client,
-      sequence,
-      maxAge: const Duration(minutes: 2),
-      logTag: 'POLL',
-    );
-  }
-
-  Future<void> _fetchSequence(
-    ImapClient client,
-    MessageSequence sequence, {
-    required Duration maxAge,
-    required String logTag,
-  }) async {
-    try {
-      if (!client.isConnected) return;
-
-      final result = await _fetchFullTextMessages(client, sequence);
-      final now = DateTime.now();
-
-      for (final msg in result.messages) {
-        final uid = msg.uid ?? 0;
-        if (uid > 0 && _processedUids.contains(uid)) continue;
-
-        final msgDate = msg.decodeDate() ?? DateTime.now();
-        if (now.difference(msgDate) > maxAge) continue;
-
-        final sender = msg.from?.first.email ?? '';
-        final recipient = msg.to?.first.email ?? msg.to?.first.toString();
-        final subject = msg.decodeSubject() ?? '';
-        final body = _decodeBody(msg);
-
-        final otp = extractOtp(sender: sender, subject: subject, body: body);
-        if (otp != null && !_otpController.isClosed) {
-          if (uid > 0) _processedUids.add(uid);
-          _emitOtp(
-            otp: otp,
-            sender: sender,
-            subject: subject,
-            recipient: recipient,
-            timestamp: msgDate,
-          );
-        }
-      }
-    } catch (e) {
-      _log(logTag, 'Error: $e');
-    }
-  }
-
-  Future<FetchImapResult> _fetchFullTextMessages(
-    ImapClient client,
-    MessageSequence sequence,
-  ) async {
-    final stopwatch = Stopwatch()..start();
-    final result = await client.fetchMessages(
-      sequence,
-      '(UID ENVELOPE BODY.PEEK[TEXT])',
-    );
-    _log('FETCH', 'Text body fetched in ${stopwatch.elapsedMilliseconds}ms');
-    return result;
-  }
-
-  void _emitOtp({
-    required String otp,
-    required String sender,
-    required String subject,
-    required String? recipient,
-    required DateTime timestamp,
-  }) {
-    _log('FETCH', 'OTP: $otp');
-    _otpController.add(
-      OtpEntry(
-        code: otp,
-        sender: sender,
-        subject: subject,
-        recipient: recipient,
-        timestamp: timestamp,
-      ),
-    );
+    if (client == null) return;
+    try { await client.logout(); } catch (_) {}
+    try { await client.disconnect(); } catch (_) {}
   }
 
   Future<Mailbox> _connectClient(
@@ -558,35 +380,19 @@ class ImapService {
     final stopwatch = Stopwatch()..start();
 
     await client.connectToServer(
-      host,
-      port,
+      host, port,
       isSecure: port == 993,
       timeout: _connectTimeout,
     );
-    _log('CONNECT', 'Socket ready in ${stopwatch.elapsedMilliseconds}ms');
+    _log('CONNECT', 'Socket ${stopwatch.elapsedMilliseconds}ms');
 
     await client.login(username, normalizePassword(password));
-    _log('CONNECT', 'Login OK in ${stopwatch.elapsedMilliseconds}ms');
+    _log('CONNECT', 'Login ${stopwatch.elapsedMilliseconds}ms');
 
     final inbox = await _selectInboxFast(client);
     _lastExists = inbox.messagesExists;
-    _log('CONNECT', 'INBOX selected in ${stopwatch.elapsedMilliseconds}ms');
+    _log('CONNECT', 'INBOX selected ${stopwatch.elapsedMilliseconds}ms');
     return inbox;
-  }
-
-  Future<bool> _trySelectMailbox(ImapClient client, String mailbox) async {
-    try {
-      if (mailbox.toUpperCase() == 'INBOX') {
-        await _selectInboxFast(client);
-      } else {
-        await client.selectMailboxByPath(mailbox);
-      }
-      _log('MAILBOX', 'Selected $mailbox');
-      return true;
-    } catch (e) {
-      _log('MAILBOX', 'Cannot select $mailbox: $e');
-      return false;
-    }
   }
 
   Future<Mailbox> _selectInboxFast(ImapClient client) {
@@ -599,8 +405,38 @@ class ImapService {
     return client.selectMailbox(inbox);
   }
 
-  Future<SearchImapResult> _searchForMessages(
-    ImapClient client, {
+  Future<bool> _trySelectInbox(ImapClient client) async {
+    try {
+      await _selectInboxFast(client);
+      return true;
+    } catch (e) {
+      _log('MAILBOX', 'Cannot select INBOX: $e');
+      return false;
+    }
+  }
+
+  // ─── Fetching & parsing ────────────────────────────────────────────────
+
+  Future<FetchImapResult> _fetchFullText(
+    ImapClient client,
+    MessageSequence sequence,
+  ) async {
+    final sw = Stopwatch()..start();
+    final result = await client.fetchMessages(
+      sequence,
+      '(UID ENVELOPE BODY.PEEK[TEXT])',
+    );
+    _log('FETCH', 'Body fetched in ${sw.elapsedMilliseconds}ms');
+    return result;
+  }
+
+  MessageSequence? _latestSequenceFromCount(int latest, int maxMessages) {
+    if (latest <= 0 || maxMessages <= 0) return null;
+    final first = latest - maxMessages + 1;
+    return MessageSequence.fromRange(first < 1 ? 1 : first, latest);
+  }
+
+  String _buildSearchCriteria({
     String subjectKeyword = '',
     String bodyKeyword = '',
     DateTime? from,
@@ -613,19 +449,12 @@ class ImapService {
     if (bodyKeyword.trim().isNotEmpty) {
       builder.add(SearchTermBody(bodyKeyword.trim()));
     }
-    if (from != null) {
-      builder.add(SearchTermSince(from));
-    }
+    if (from != null) builder.add(SearchTermSince(from));
     if (to != null) {
       builder.add(SearchTermBefore(to.add(const Duration(days: 1))));
     }
-
     final criteria = builder.toString();
-    _log('SEARCH', 'Criteria: ${criteria.isEmpty ? 'ALL' : criteria}');
-
-    return client.searchMessages(
-      searchCriteria: criteria.isEmpty ? 'ALL' : criteria,
-    );
+    return criteria.isEmpty ? 'ALL' : criteria;
   }
 
   bool _messageMatches({
@@ -634,75 +463,47 @@ class ImapService {
     required String subjectKeyword,
     required String bodyKeyword,
   }) {
-    final searchableSubject = subject.toLowerCase();
-    final searchableBody = body.toLowerCase();
-    final subjectWords = subjectKeyword
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((word) => word.isNotEmpty);
-    final bodyWords = bodyKeyword
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((word) => word.isNotEmpty);
-
-    final subjectMatches = subjectWords.every(searchableSubject.contains);
-    final bodyMatches = bodyWords.every(searchableBody.contains);
-
-    return subjectMatches && bodyMatches;
+    final s = subject.toLowerCase();
+    final b = body.toLowerCase();
+    final sw = subjectKeyword.toLowerCase().split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty);
+    final bw = bodyKeyword.toLowerCase().split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty);
+    return sw.every(s.contains) && bw.every(b.contains);
   }
 
   String _decodeBody(MimeMessage message) {
-    final body =
-        message.decodeTextPlainPart() ??
+    return message.decodeTextPlainPart() ??
         message.decodeTextHtmlPart() ??
-        message.decodeContentText();
-    return body ?? '';
+        message.decodeContentText() ??
+        '';
   }
 
   String _preview(String body) {
-    final collapsed = body.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return collapsed.length > 800 ? collapsed.substring(0, 800) : collapsed;
+    final c = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return c.length > 800 ? c.substring(0, 800) : c;
   }
 
-  int _fetchLimitFor(int desiredResults) {
-    if (desiredResults <= 0) {
-      return 0;
-    }
-    final limit = desiredResults * 8;
-    if (limit < 20) {
-      return 20;
-    }
-    return limit > 60 ? 60 : limit;
-  }
+  // ─── OTP extraction ────────────────────────────────────────────────────
 
   String? extractOtp({
     required String sender,
     required String subject,
     required String body,
   }) {
-    final normalizedSubject = _normalizeDigits(subject);
-    final normalizedBody = _normalizeDigits(body);
+    final text = '${_normalizeDigits(subject)}\n${_normalizeDigits(body)}';
 
-    final text = '$normalizedSubject\n$normalizedBody';
+    final compact = RegExp(r'(^|[^\d])(\d{6})(?!\d)').firstMatch(text);
+    if (compact != null) return compact.group(2);
 
-    final compactMatch = RegExp(r'(^|[^\d])(\d{6})(?!\d)').firstMatch(text);
-    if (compactMatch != null) {
-      return compactMatch.group(2);
-    }
-
-    final spacedMatch = RegExp(
-      r'(^|[^\d])((\d[\s\-_.]*){6})(?!\d)',
-    ).firstMatch(text);
-    if (spacedMatch != null) {
+    final spaced = RegExp(r'(^|[^\d])((\d[\s\-_.]*){6})(?!\d)').firstMatch(text);
+    if (spaced != null) {
       final digits = RegExp(r'\d')
-          .allMatches(spacedMatch.group(2) ?? '')
-          .map((match) => match.group(0)!)
+          .allMatches(spaced.group(2) ?? '')
+          .map((m) => m.group(0)!)
           .join();
-      if (digits.length == 6) {
-        return digits;
-      }
+      if (digits.length == 6) return digits;
     }
-
     return null;
   }
 
@@ -717,23 +518,5 @@ class ImapService {
       }
     }
     return buffer.toString();
-  }
-
-  Future<void> stop() async {
-    _isRunning = false;
-    _isIdleRunning = false;
-    await _disconnectClient();
-    _host = null;
-    _port = null;
-    _username = null;
-    _password = null;
-    _lastExists = null;
-
-    _log('STOP', 'Stopped');
-  }
-
-  void dispose() {
-    stop();
-    _otpController.close();
   }
 }
