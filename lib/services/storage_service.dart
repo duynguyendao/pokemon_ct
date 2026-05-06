@@ -16,6 +16,7 @@ class StorageService {
   static const _fakeBrowserKey = 'fakeBrowser';
   static const _incognitoModeKey = 'incognitoMode';
   static const _shortcut5gEnabledKey = 'shortcut5gEnabled';
+  static const _otpSourceKey = 'otpSource';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -140,6 +141,16 @@ class StorageService {
   Future<void> saveShortcut5gEnabled(bool v) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_shortcut5gEnabledKey, v);
+  }
+
+  Future<String> loadOtpSource() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_otpSourceKey) ?? 'imap';
+  }
+
+  Future<void> saveOtpSource(String source) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_otpSourceKey, source);
   }
 
   List<FilterRule> _defaultRules() => [

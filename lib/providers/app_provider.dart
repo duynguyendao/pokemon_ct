@@ -24,6 +24,7 @@ class AppProvider extends ChangeNotifier {
   bool _fakeBrowser = true;
   bool _incognitoMode = false;
   bool _shortcut5gEnabled = true;
+  String _otpSource = 'imap'; // 'imap' or 'clipboard'
   bool _loaded = false;
   bool _imapStarting = false;
   bool _imapStopping = false;
@@ -49,6 +50,8 @@ class AppProvider extends ChangeNotifier {
   bool get fakeBrowser => _fakeBrowser;
   bool get incognitoMode => _incognitoMode;
   bool get shortcut5gEnabled => _shortcut5gEnabled;
+  String get otpSource => _otpSource;
+  bool get isClipboardOtpMode => _otpSource == 'clipboard';
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
@@ -85,6 +88,7 @@ class AppProvider extends ChangeNotifier {
     _fakeBrowser = await _storage.loadFakeBrowser();
     _incognitoMode = await _storage.loadIncognitoMode();
     _shortcut5gEnabled = await _storage.loadShortcut5gEnabled();
+    _otpSource = await _storage.loadOtpSource();
     _loaded = true;
     _setupOtpStream();
     notifyListeners();
@@ -241,6 +245,12 @@ class AppProvider extends ChangeNotifier {
   Future<void> setShortcut5gEnabled(bool v) async {
     _shortcut5gEnabled = v;
     await _storage.saveShortcut5gEnabled(v);
+    notifyListeners();
+  }
+
+  Future<void> setOtpSource(String source) async {
+    _otpSource = source;
+    await _storage.saveOtpSource(source);
     notifyListeners();
   }
 

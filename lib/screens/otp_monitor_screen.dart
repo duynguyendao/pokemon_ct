@@ -441,6 +441,52 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // OTP Source Card
+          _sectionCard(
+            title: 'Nguồn OTP',
+            children: [
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                    value: 'imap',
+                    label: Text('IMAP Email'),
+                    icon: Icon(Icons.email_outlined, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: 'clipboard',
+                    label: Text('Shortcut Clipboard'),
+                    icon: Icon(Icons.content_paste, size: 16),
+                  ),
+                ],
+                selected: {p.otpSource},
+                onSelectionChanged: (v) => p.setOtpSource(v.first),
+              ),
+              const SizedBox(height: 10),
+              if (p.otpSource == 'clipboard')
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withAlpha(20),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.primary.withAlpha(80)),
+                  ),
+                  child: const Text(
+                    '📋 Shortcut iPhone sẽ tự phát hiện email → lấy OTP → copy vào Clipboard.\n'
+                    'Khi browser đang chờ OTP, app tự động phát hiện mã 6 số mới trong Clipboard và điền vào.\n'
+                    'Clipboard sẽ được xóa ngay sau khi dùng để tránh nhầm lẫn OTP cũ.',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.4),
+                  ),
+                )
+              else
+                const Text(
+                  '💡 IMAP mode: app tự kết nối email để lấy OTP bên dưới.',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
           // IMAP Connection Card
           _sectionCard(
             title: 'Kết nối IMAP',

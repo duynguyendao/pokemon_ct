@@ -465,6 +465,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }) async {
     final provider = context.read<AppProvider>();
 
+    if (provider.isClipboardOtpMode) {
+      return _waitForOtpFromClipboard(timeout: timeout, excludeCode: excludeCode);
+    }
+
     final existing = _getOtpForAccount();
     if (existing != null && existing != excludeCode) return existing;
 
@@ -509,6 +513,53 @@ class _BrowserScreenState extends State<BrowserScreen> {
     return completer.future;
   }
 
+  Future<String?> _waitForOtpFromClipboard({
+    required Duration timeout,
+    String? excludeCode,
+  }) async {
+    final completer = Completer<String?>();
+    bool checking = false;
+    final otpRegex = RegExp(r'^\d{6}$');
+
+    void finish(String? code) {
+      if (completer.isCompleted) return;
+      completer.complete(code);
+    }
+
+    Future<void> check() async {
+      if (checking || completer.isCompleted) return;
+      checking = true;
+      try {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        final text = data?.text?.trim() ?? '';
+        if (otpRegex.hasMatch(text) && text != excludeCode) {
+          finish(text);
+        }
+      } finally {
+        checking = false;
+      }
+    }
+
+    await check();
+    if (completer.isCompleted) return completer.future;
+
+    final pollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) => check());
+    final timeoutTimer = Timer(timeout, () => finish(null));
+    var elapsedSeconds = 0;
+    final statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      elapsedSeconds += 5;
+      if (mounted && !completer.isCompleted) {
+        _setStatus('📋 Chờ clipboard OTP... $elapsedSeconds/${timeout.inSeconds}s');
+      }
+    });
+
+    final result = await completer.future;
+    pollTimer.cancel();
+    timeoutTimer.cancel();
+    statusTimer.cancel();
+    return result;
+  }
+
   Future<void> _autoSubmitOtp() async {
     if (!mounted) return;
     _setStatus('Dang lay OTP...');
@@ -532,6 +583,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _lastSubmittedOtp = otp;
     });
     _setStatus('🔢 Điền OTP: $otp');
+    // Xóa clipboard sau khi dùng để tránh lấy nhầm OTP cũ lần sau
+    if (context.read<AppProvider>().isClipboardOtpMode) {
+      await Clipboard.setData(const ClipboardData(text: ''));
+    }
     await _controller.runJavaScript(buildOtpAutoSubmitScript(otp));
   }
 
