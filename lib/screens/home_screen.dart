@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/account.dart';
 import '../models/start_all_report.dart';
@@ -160,6 +161,9 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _openAccount(Account account, AppProvider p) async {
+    // Copy email vào clipboard để Shortcut dùng lọc OTP đúng account
+    await Clipboard.setData(ClipboardData(text: account.email));
+
     if (p.shortcut5gEnabled) {
       if (mounted) {
         showDialog(
