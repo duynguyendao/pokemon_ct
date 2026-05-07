@@ -24,7 +24,7 @@ class AppProvider extends ChangeNotifier {
   bool _fakeBrowser = true;
   bool _incognitoMode = false;
   bool _shortcut5gEnabled = true;
-  String _otpSource = 'imap'; // 'imap' or 'clipboard'
+  String _otpSource = 'clipboard'; // 'imap' or 'clipboard'
   String _targetProductName = '';
   bool _loaded = false;
   bool _imapStarting = false;

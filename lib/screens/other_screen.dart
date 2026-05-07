@@ -43,6 +43,7 @@ class _OtherScreenState extends State<OtherScreen>
   String _wvUrl = '';
   Completer<void>? _pageLoadCompleter;
   Completer<List<dynamic>>? _extractCompleter;
+  Completer<bool>? _otpFieldCompleter;
 
   static const _extractJs = '''
 (function() {
@@ -68,6 +69,17 @@ class _OtherScreenState extends State<OtherScreen>
     });
   });
   window.FlutterChannel.postMessage(JSON.stringify({type:'lotteryResults', data:items}));
+})();
+''';
+
+  static const _checkOtpFieldJs = '''
+(function() {
+  var selectors = [
+    'input#authCode','input[name="dwfrm_factor2Auth_authCode"]',
+    'input[name="passcode"]','input[name="otp"]','input[maxlength="6"]'
+  ];
+  var found = selectors.some(function(s){ return !!document.querySelector(s); });
+  window.FlutterChannel.postMessage(JSON.stringify({type:'otpFieldCheck',found:found}));
 })();
 ''';
 
@@ -164,10 +176,15 @@ class _OtherScreenState extends State<OtherScreen>
   void _handleJs(String message) {
     try {
       final data = jsonDecode(message) as Map<String, dynamic>;
-      if (data['type'] == 'lotteryResults') {
+      final type = data['type'] as String?;
+      if (type == 'lotteryResults') {
         final items = (data['data'] as List?) ?? [];
         if (_extractCompleter?.isCompleted == false) {
           _extractCompleter!.complete(items);
+        }
+      } else if (type == 'otpFieldCheck') {
+        if (_otpFieldCompleter?.isCompleted == false) {
+          _otpFieldCompleter!.complete(data['found'] == true);
         }
       }
     } catch (_) {}
@@ -183,18 +200,6 @@ class _OtherScreenState extends State<OtherScreen>
     } catch (_) {}
   }
 
-  Future<bool> _waitForUrlChange(
-      {required String fromContains,
-      Duration timeout = const Duration(seconds: 25)}) async {
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      if (!mounted || _stopRequested) return false;
-      if (!_wvUrl.contains(fromContains)) return true;
-      await Future.delayed(const Duration(milliseconds: 400));
-    }
-    return false;
-  }
-
   LotteryResultEntry _errEntry(String email, String keyword, String reason) =>
       LotteryResultEntry(
         accountEmail: email,
@@ -202,6 +207,58 @@ class _OtherScreenState extends State<OtherScreen>
         time: '',
         result: reason,
       );
+
+  Future<bool> _checkForOtpField() async {
+    if (_wv == null) return false;
+    _otpFieldCompleter = Completer<bool>();
+    await _wv!.runJavaScript(_checkOtpFieldJs);
+    return _otpFieldCompleter!.future.timeout(
+      const Duration(milliseconds: 800),
+      onTimeout: () => false,
+    );
+  }
+
+  Future<String?> _waitForClipboardOtp({required Duration timeout}) async {
+    final regex = RegExp(r'^\d{6}$');
+    final completer = Completer<String?>();
+    bool checking = false;
+
+    void finish(String? code) {
+      if (completer.isCompleted) return;
+      completer.complete(code);
+    }
+
+    Future<void> poll() async {
+      if (checking || completer.isCompleted) return;
+      checking = true;
+      try {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        final text = data?.text?.trim() ?? '';
+        if (regex.hasMatch(text)) finish(text);
+      } finally {
+        checking = false;
+      }
+    }
+
+    await poll();
+    if (completer.isCompleted) return completer.future;
+
+    final pollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) => poll());
+    final timeoutTimer = Timer(timeout, () => finish(null));
+    var elapsed = 0;
+    final statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      elapsed += 5;
+      if (mounted && !completer.isCompleted) {
+        setState(() => _statusText = '${_statusText.split('\n').first}\n📋 Chờ OTP clipboard... $elapsed/${timeout.inSeconds}s');
+      }
+    });
+
+    final result = await completer.future;
+    pollTimer.cancel();
+    timeoutTimer.cancel();
+    statusTimer.cancel();
+    return result;
+  }
 
   void _snack(String msg, {Duration duration = const Duration(seconds: 2)}) {
     if (!mounted) return;
@@ -246,7 +303,7 @@ class _OtherScreenState extends State<OtherScreen>
       LotteryResultEntry entry;
       try {
         entry = await _checkAccount(account, p, keyword)
-            .timeout(const Duration(seconds: 90));
+            .timeout(const Duration(seconds: 150));
       } on TimeoutException {
         entry = _errEntry(account.email, keyword, 'Timeout');
       } catch (_) {
@@ -304,9 +361,48 @@ class _OtherScreenState extends State<OtherScreen>
 
     await _wv!.runJavaScript(_loginClickJs);
 
+    // Wait for EITHER: URL leaves /login  OR  OTP field appears
     setState(() => _statusText = '${account.email}\nĐăng nhập...');
-    final loginOk = await _waitForUrlChange(fromContains: '/login');
-    if (!loginOk) return _errEntry(account.email, keyword, 'ログイン失敗');
+    bool loginResolved = false;
+    final loginDeadline = DateTime.now().add(const Duration(seconds: 30));
+
+    while (DateTime.now().isBefore(loginDeadline)) {
+      if (!mounted || _stopRequested) return _errEntry(account.email, keyword, 'Stopped');
+
+      // URL already left login → success without OTP
+      if (!_wvUrl.contains('/login')) {
+        loginResolved = true;
+        break;
+      }
+
+      // Check if OTP field appeared
+      final hasOtp = await _checkForOtpField();
+      if (hasOtp) {
+        setState(() => _statusText = '${account.email}\n📋 Chờ OTP clipboard...');
+        final otp = await _waitForClipboardOtp(timeout: const Duration(seconds: 60));
+        if (otp == null) return _errEntry(account.email, keyword, 'OTP Timeout');
+
+        // Fill + submit OTP
+        setState(() => _statusText = '${account.email}\n🔢 Điền OTP $otp...');
+        await _wv!.runJavaScript(buildOtpAutoSubmitScript(otp));
+        await Clipboard.setData(const ClipboardData(text: ''));
+        await Future.delayed(const Duration(seconds: 2));
+
+        // Wait for OTP page to pass (field gone or URL changed)
+        final otpDeadline = DateTime.now().add(const Duration(seconds: 20));
+        while (DateTime.now().isBefore(otpDeadline)) {
+          if (!mounted || _stopRequested) return _errEntry(account.email, keyword, 'Stopped');
+          final stillOtp = await _checkForOtpField();
+          if (!stillOtp) { loginResolved = true; break; }
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+        break;
+      }
+
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    if (!loginResolved) return _errEntry(account.email, keyword, 'ログイン失敗');
 
     await Future.delayed(const Duration(milliseconds: 500));
 

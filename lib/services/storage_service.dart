@@ -146,7 +146,7 @@ class StorageService {
 
   Future<String> loadOtpSource() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_otpSourceKey) ?? 'imap';
+    return prefs.getString(_otpSourceKey) ?? 'clipboard';
   }
 
   Future<void> saveOtpSource(String source) async {
