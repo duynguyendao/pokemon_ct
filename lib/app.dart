@@ -4,6 +4,7 @@ import 'providers/app_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/otp_monitor_screen.dart';
 import 'screens/proxy_manager_screen.dart';
+import 'screens/other_screen.dart';
 import 'utils/app_theme.dart';
 
 class PokemonCTApp extends StatelessWidget {
@@ -37,6 +38,7 @@ class _MainShellState extends State<_MainShell> {
     HomeScreen(),
     OtpMonitorScreen(),
     ProxyManagerScreen(),
+    OtherScreen(),
   ];
 
   @override
@@ -79,6 +81,7 @@ class _MainShellState extends State<_MainShell> {
     return Scaffold(
       body: IndexedStack(index: _index, children: _pages),
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
         currentIndex: _index,
         onTap: (i) => setState(() => _index = i),
         items: [
@@ -111,6 +114,10 @@ class _MainShellState extends State<_MainShell> {
           BottomNavigationBarItem(
             icon: const Icon(Icons.vpn_lock),
             label: 'Proxy (${p.proxies.length})',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.bar_chart_outlined),
+            label: 'Other',
           ),
         ],
       ),

@@ -30,8 +30,15 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   final _loginUrlCtrl = TextEditingController(
     text: 'https://www.pokemoncenter-online.com/login/',
   );
-  final _lotteryUrlCtrl = TextEditingController();
-  final _lotteryResultUrlCtrl = TextEditingController();
+  final _lotteryUrlCtrl = TextEditingController(
+    text: 'https://www.pokemoncenter-online.com/lottery/',
+  );
+  final _lotteryResultUrlCtrl = TextEditingController(
+    text: 'https://www.pokemoncenter-online.com/lottery-history/',
+  );
+  final _orderHistoryUrlCtrl = TextEditingController(
+    text: 'https://www.pokemoncenter-online.com/order-history/',
+  );
 
   // Search
   final _searchSubjectCtrl = TextEditingController(text: 'ポケモンセンター');
@@ -74,6 +81,8 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
       _lotteryUrlCtrl.text = urls['lotteryUrl']!;
     if (urls['lotteryResultUrl']?.isNotEmpty == true)
       _lotteryResultUrlCtrl.text = urls['lotteryResultUrl']!;
+    if (urls['orderHistoryUrl']?.isNotEmpty == true)
+      _orderHistoryUrlCtrl.text = urls['orderHistoryUrl']!;
   }
 
   @override
@@ -89,6 +98,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     _loginUrlCtrl.dispose();
     _lotteryUrlCtrl.dispose();
     _lotteryResultUrlCtrl.dispose();
+    _orderHistoryUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -104,6 +114,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
       'loginUrl': _loginUrlCtrl.text.trim(),
       'lotteryUrl': _lotteryUrlCtrl.text.trim(),
       'lotteryResultUrl': _lotteryResultUrlCtrl.text.trim(),
+      'orderHistoryUrl': _orderHistoryUrlCtrl.text.trim(),
     });
   }
 
@@ -742,6 +753,20 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
                   prefixIcon: Icon(
                     Icons.emoji_events_outlined,
                     color: AppColors.done,
+                    size: 18,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _orderHistoryUrlCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: const InputDecoration(
+                  labelText: 'Order History URL',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(
+                    Icons.receipt_long_outlined,
+                    color: AppColors.secondary,
                     size: 18,
                   ),
                 ),

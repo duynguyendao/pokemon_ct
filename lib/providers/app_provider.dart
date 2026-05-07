@@ -25,6 +25,7 @@ class AppProvider extends ChangeNotifier {
   bool _incognitoMode = false;
   bool _shortcut5gEnabled = true;
   String _otpSource = 'imap'; // 'imap' or 'clipboard'
+  String _targetProductName = '';
   bool _loaded = false;
   bool _imapStarting = false;
   bool _imapStopping = false;
@@ -43,8 +44,15 @@ class AppProvider extends ChangeNotifier {
   Map<String, String> get urlConfig => _urlConfig;
   String get loginUrl =>
       _urlConfig['loginUrl'] ?? 'https://www.pokemoncenter-online.com/login/';
-  String get lotteryUrl => _urlConfig['lotteryUrl'] ?? '';
-  String get lotteryResultUrl => _urlConfig['lotteryResultUrl'] ?? '';
+  String get lotteryUrl => _urlConfig['lotteryUrl']?.isNotEmpty == true
+      ? _urlConfig['lotteryUrl']!
+      : 'https://www.pokemoncenter-online.com/lottery/';
+  String get lotteryResultUrl => _urlConfig['lotteryResultUrl']?.isNotEmpty == true
+      ? _urlConfig['lotteryResultUrl']!
+      : 'https://www.pokemoncenter-online.com/lottery-history/';
+  String get orderHistoryUrl => _urlConfig['orderHistoryUrl']?.isNotEmpty == true
+      ? _urlConfig['orderHistoryUrl']!
+      : 'https://www.pokemoncenter-online.com/order-history/';
   String get defaultPassword => _defaultPassword;
   bool get proxyEnabled => _proxyEnabled;
   bool get fakeBrowser => _fakeBrowser;
@@ -52,6 +60,7 @@ class AppProvider extends ChangeNotifier {
   bool get shortcut5gEnabled => _shortcut5gEnabled;
   String get otpSource => _otpSource;
   bool get isClipboardOtpMode => _otpSource == 'clipboard';
+  String get targetProductName => _targetProductName;
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
@@ -89,6 +98,7 @@ class AppProvider extends ChangeNotifier {
     _incognitoMode = await _storage.loadIncognitoMode();
     _shortcut5gEnabled = await _storage.loadShortcut5gEnabled();
     _otpSource = await _storage.loadOtpSource();
+    _targetProductName = await _storage.loadTargetProductName();
     _loaded = true;
     _setupOtpStream();
     notifyListeners();
@@ -251,6 +261,12 @@ class AppProvider extends ChangeNotifier {
   Future<void> setOtpSource(String source) async {
     _otpSource = source;
     await _storage.saveOtpSource(source);
+    notifyListeners();
+  }
+
+  Future<void> setTargetProductName(String name) async {
+    _targetProductName = name;
+    await _storage.saveTargetProductName(name);
     notifyListeners();
   }
 

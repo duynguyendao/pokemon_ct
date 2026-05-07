@@ -17,6 +17,7 @@ class StorageService {
   static const _incognitoModeKey = 'incognitoMode';
   static const _shortcut5gEnabledKey = 'shortcut5gEnabled';
   static const _otpSourceKey = 'otpSource';
+  static const _targetProductNameKey = 'targetProductName';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -153,6 +154,16 @@ class StorageService {
     await prefs.setString(_otpSourceKey, source);
   }
 
+  Future<String> loadTargetProductName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_targetProductNameKey) ?? '';
+  }
+
+  Future<void> saveTargetProductName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_targetProductNameKey, name);
+  }
+
   List<FilterRule> _defaultRules() => [
     FilterRule(
       type: FilterType.sender,
@@ -190,7 +201,8 @@ class StorageService {
 
   Map<String, String> _defaultUrlConfig() => {
     'loginUrl': 'https://www.pokemoncenter-online.com/login/',
-    'lotteryUrl': '',
-    'lotteryResultUrl': '',
+    'lotteryUrl': 'https://www.pokemoncenter-online.com/lottery/',
+    'lotteryResultUrl': 'https://www.pokemoncenter-online.com/lottery-history/',
+    'orderHistoryUrl': 'https://www.pokemoncenter-online.com/order-history/',
   };
 }
