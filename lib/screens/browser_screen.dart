@@ -827,20 +827,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  /// reCAPTCHA / block detected: clear cookies → đổi UA → 5G → retry login
+  /// reCAPTCHA / block detected: clear cookies → đổi profile → 5G → retry login
   Future<void> _recoverAndRetry() async {
     if (!mounted) return;
     _captchaRetryCount++;
+    // Capture context-dependent values trước await
+    final p = context.read<AppProvider>();
     _setStatus('🛡️ reCAPTCHA detected — reset lần $_captchaRetryCount/$_maxCaptchaRetries...');
 
-    // 1. Xóa cookies + storage
+    // 1. Xóa cookies + storage, reset fingerprint patch flag
     await WebViewCookieManager().clearCookies();
     await _controller.runJavaScript(
       'try{localStorage.clear();sessionStorage.clear();}catch(e){};'
       'window.__fpPatched=false;',
     );
 
-    // 2. Đổi sang device profile mới
+    // 2. Đổi sang device profile mới (UA được re-inject qua buildAntiFingerprintScript khi load trang)
     setState(() {
       _profile = randomProfile();
       _lastAutoFillUrl = null;
@@ -848,9 +850,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _otpAutoSubmitting = false;
       _loginAttemptTime = null;
     });
-    await _controller.setCustomUserAgent(_profile.userAgent);
-
-    final p = context.read<AppProvider>();
 
     // 3. Đổi 5G nếu được bật
     if (p.shortcut5gEnabled) {
@@ -858,7 +857,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
       await ShortcutService.triggerShortcut('5G');
       await Future.delayed(const Duration(seconds: 5));
     } else {
-      // Delay ngắn để tránh rate-limit
       await Future.delayed(const Duration(seconds: 3));
     }
 
