@@ -152,8 +152,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   // Error messages đặc trưng của Pokémon Center
   var kws = [
     'reCAPTCHA 認証失敗','reCAPTCHA認証','認証に失敗',
-    'エラーが発生しました','システムエラー',
+    'エラーが発生しました','エラー発生しました','システムエラー',
     'アクセスが一時的に制限','ロボットではありません',
+    'ただいまメンテナンス','しばらくしてから',
   ];
   var text = document.body ? document.body.innerText : '';
   for (var j = 0; j < kws.length; j++) {
@@ -409,7 +410,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
             }
 
             // Auto-fill email + password trên trang login
-            if (_isLoginPage(url) && _lastAutoFillUrl != url && !_autoFilling) {
+            // _loginAttemptTime != null nghĩa là đã click login rồi → không fill lại để tránh loop
+            if (_isLoginPage(url) && _lastAutoFillUrl != url && !_autoFilling && _loginAttemptTime == null) {
               _lastAutoFillUrl = url;
               await _waitForElement([
                 'input[type="email"]',
@@ -766,8 +768,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
       return;
     }
     _otpRetryCount++;
-    _setStatus('⚠️ Sai OTP, chờ mã mới... ($_otpRetryCount/$_maxOtpRetries)');
+    final otpUrl = _lastOtpPageUrl;
+    _setStatus('⚠️ Sai OTP — reload trang + chờ mã mới... ($_otpRetryCount/$_maxOtpRetries)');
 
+    setState(() => _otpAutoSubmitting = false);
+
+    // Reload OTP page để tránh submit lại mã cũ vào form đã có lỗi
+    // Giữ _lastOtpPageUrl nguyên để tránh _autoSubmitOtp tự trigger
+    if (otpUrl != null) {
+      await _controller.loadRequest(Uri.parse(otpUrl));
+      await _waitForElement([
+        'input#authCode',
+        'input[name="dwfrm_factor2Auth_authCode"]',
+        'input[name="passcode"]',
+        'input[maxlength="6"]',
+      ], timeout: 5000);
+    }
+
+    if (!mounted) return;
     final newOtp = await _waitForOtpForAccount(
       timeout: const Duration(seconds: 90),
       excludeCode: _lastSubmittedOtp,
@@ -945,8 +963,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _autoFill({bool silent = false}) async {
-    // Reset login timestamp khi bắt đầu lại flow login
-    _loginAttemptTime = null;
+    // Chỉ reset timestamp khi user bấm tự điền thủ công (không phải auto trigger)
+    // → tránh loop: auto-trigger không được reset timestamp đã set sau khi click login
+    if (!silent) _loginAttemptTime = null;
     setState(() => _autoFilling = true);
     _setStatus('📧 Điền email + password...');
     try {
