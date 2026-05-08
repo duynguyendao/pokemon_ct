@@ -276,9 +276,21 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       ? '''try { delete window.chrome; } catch(e) {}
     Object.defineProperty(window, 'chrome', { get: () => undefined, configurable: true, enumerable: false });'''
       : '''window.chrome = {
-      runtime: { id: undefined, connect: function(){}, sendMessage: function(){} },
-      loadTimes: function(){},
-      csi: function(){ return {startE: Date.now(), onloadT: Date.now(), pageT: 1.0, tran: 15}; },
+      app: { isInstalled: false, runningState: 'cannot_run', getDetails: function(){ return null; }, getIsInstalled: function(){ return false; } },
+      runtime: {
+        id: undefined,
+        connect: function(){ return { onMessage: { addListener: function(){} }, onDisconnect: { addListener: function(){} }, postMessage: function(){} }; },
+        sendMessage: function(){},
+        onConnect: { addListener: function(){} },
+        onMessage: { addListener: function(){} },
+        getPlatformInfo: function(cb) {
+          var info = { os: 'android', arch: 'arm', nacl_arch: 'arm' };
+          if (cb) cb(info);
+          return Promise.resolve(info);
+        },
+      },
+      loadTimes: function(){ return { firstPaintTime: 0, firstPaintAfterLoadTime: 0, requestTime: Date.now() / 1000, startLoadTime: Date.now() / 1000 }; },
+      csi: function(){ return { startE: Date.now(), onloadT: Date.now(), pageT: 1.0, tran: 15 }; },
     };''';
 
   // Safari iOS có navigator.standalone; Chrome không có
@@ -330,8 +342,9 @@ String buildAntiFingerprintScript(DeviceProfile p) {
     def(nav, 'doNotTrack',          null);
     def(nav, 'cookieEnabled',       true);
     def(nav, 'onLine',              true);
-    def(nav, 'webdriver',           false);
+    // CRITICAL: webdriver must be undefined (non-existent), not false — real browsers don't define this
     try { delete nav.__proto__.webdriver; } catch(e) {}
+    try { Object.defineProperty(nav, 'webdriver', { get: () => undefined, configurable: true, enumerable: false }); } catch(e) {}
     $standaloneJs
 
     // ── 2. screen ──────────────────────────────────────────────────────────
@@ -467,18 +480,25 @@ String buildAntiFingerprintScript(DeviceProfile p) {
     // ── 10. Plugins — Safari iOS: rỗng; Chrome: PDF Viewer ────────────────
     $pluginsJs
 
-    // ── 11. Color gamut (media query) ──────────────────────────────────────
-    (function patchColorGamut() {
+    // ── 11. matchMedia — color gamut + mobile pointer/hover consistency ───────
+    (function patchMatchMedia() {
       const origMQ = window.matchMedia;
       if (!origMQ) return;
       window.matchMedia = function(query) {
         const result = origMQ.call(window, query);
-        if (query.includes('color-gamut')) {
-          const gamut = '${p.colorGamut}';
-          const matches = (gamut === 'p3' && query.includes('p3')) ||
-                          (gamut === 'srgb' && query.includes('srgb'));
-          Object.defineProperty(result, 'matches', { get: () => matches });
-        }
+        const q = query.toLowerCase();
+        try {
+          if (q.includes('color-gamut')) {
+            const gamut = '${p.colorGamut}';
+            const matches = (gamut === 'p3' && q.includes('p3')) ||
+                            (gamut === 'srgb' && q.includes('srgb'));
+            Object.defineProperty(result, 'matches', { get: () => matches, configurable: true });
+          } else if (q.includes('pointer')) {
+            Object.defineProperty(result, 'matches', { get: () => q.includes('coarse'), configurable: true });
+          } else if (q.includes('hover')) {
+            Object.defineProperty(result, 'matches', { get: () => q.includes('none'), configurable: true });
+          }
+        } catch(e) {}
         return result;
       };
     })();
@@ -535,6 +555,49 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         get:()=>({type:'portrait-primary',angle:0,onchange:null}), configurable:true
       });
     } catch(e) {}
+
+    // ── 18. navigator.mimeTypes — consistent with plugins ────────────────────
+    (function patchMimeTypes() {
+      if (!nav.userAgent.includes('Chrome')) return;
+      try {
+        const pdf = { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: (nav.plugins && nav.plugins[0]) || {} };
+        const pdf2 = { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: (nav.plugins && nav.plugins[0]) || {} };
+        def(nav, 'mimeTypes', Object.freeze([pdf, pdf2]));
+      } catch(e) {}
+    })();
+
+    // ── 19. Hide automation eval strings ─────────────────────────────────────
+    (function patchEval() {
+      const origEval = window.eval;
+      window.eval = function(code) {
+        return origEval.call(this, code);
+      };
+      window.eval.toString = function() { return 'function eval() { [native code] }'; };
+      Function.prototype.toString = (function(origToString) {
+        return function() {
+          const s = origToString.call(this);
+          if (s.includes('__puppeteer') || s.includes('__playwright') || s.includes('__webdriver')) {
+            return 'function () { [native code] }';
+          }
+          return s;
+        };
+      })(Function.prototype.toString);
+    })();
+
+    // ── 20. navigator.connection — mobile LTE/5G ──────────────────────────────
+    (function patchConnection() {
+      const conn = {
+        effectiveType: '4g',
+        downlink: 8 + (SEED % 5),
+        downlinkMax: Infinity,
+        rtt: 40 + (SEED % 30),
+        saveData: false,
+        type: 'cellular',
+        onchange: null,
+        ontypechange: null,
+      };
+      try { def(nav, 'connection', conn); } catch(e) {}
+    })();
 
   } catch(e) {}
 })();
