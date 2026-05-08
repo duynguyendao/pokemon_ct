@@ -60,6 +60,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // Lottery result extraction (lotteryResult mode)
   bool _resultChecked = false;
+  bool _pendingResultNavigation = false;
   Completer<List<dynamic>>? _extractCompleter;
 
   // Overlay for status text (above iOS platform WebView)
@@ -319,6 +320,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   _setStatus('');
                 }
               });
+              // lotteryResult mode: sau OTP thành công → navigate về trang kết quả
+              if (widget.account.mode == AccountMode.lotteryResult &&
+                  !_resultChecked) {
+                setState(() => _pendingResultNavigation = true);
+              }
             }
             if (p.fakeBrowser) {
               _controller.runJavaScript(buildAntiFingerprintScript(_profile));
@@ -338,6 +344,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
               await _controller.runJavaScript(
                 buildAntiFingerprintScript(_profile),
               );
+            }
+
+            // Sau OTP thành công trong lotteryResult mode → điều hướng đến trang kết quả
+            if (_pendingResultNavigation &&
+                !_resultChecked &&
+                p.lotteryResultUrl.isNotEmpty) {
+              setState(() => _pendingResultNavigation = false);
+              final base = p.lotteryResultUrl.contains('?')
+                  ? p.lotteryResultUrl.split('?').first
+                  : p.lotteryResultUrl;
+              if (!url.startsWith(base)) {
+                unawaited(
+                  _controller.loadRequest(Uri.parse(p.lotteryResultUrl)),
+                );
+                return;
+              }
+              // Đã ở đúng trang → tiếp tục xuống trigger bên dưới
             }
 
             // Auto-fill email + password trên trang login
@@ -386,13 +409,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
       );
 
-    if (incognito) {
-      // Clear all cookies + localStorage before loading
-      WebViewCookieManager().clearCookies();
-      _controller.runJavaScript(
-        'try { localStorage.clear(); sessionStorage.clear(); } catch(e) {}',
-      );
-    }
+    // Luôn xóa cookies trước mỗi phiên để tránh bị flag
+    unawaited(WebViewCookieManager().clearCookies());
 
     _controller.loadRequest(Uri.parse(startUrl));
     setState(() => _currentUrl = startUrl);
@@ -694,6 +712,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
       items = await _extractCompleter!.future.timeout(const Duration(seconds: 10));
     } catch (_) {
       _setStatus('❌ Không lấy được kết quả');
+      await Future.delayed(const Duration(seconds: 3));
+      if (mounted) Navigator.of(context).pop();
       return;
     }
 
@@ -701,6 +721,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
       provider.addLotteryResult(LotteryResultEntry(
         accountEmail: email, productTitle: keyword, time: '', result: '結果なし'));
       _setStatus('⚠️ Không có kết quả trong lottery history');
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) Navigator.of(context).pop();
       return;
     }
 
@@ -716,6 +738,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
         );
         provider.addLotteryResult(entry);
         _setStatus(entry.isWon ? '🎉 当選! ${entry.productTitle}' : '😞 落選 ${entry.productTitle}');
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) Navigator.of(context).pop();
         return;
       }
     }
@@ -723,6 +747,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     provider.addLotteryResult(LotteryResultEntry(
       accountEmail: email, productTitle: keyword, time: '', result: '対象なし'));
     _setStatus('対象なし — không tìm thấy sản phẩm "$keyword"');
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) Navigator.of(context).pop();
   }
 
   Future<void> _autoFill({bool silent = false}) async {
@@ -775,6 +801,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
         'input[name="passcode"]',
         'input[maxlength="6"]',
       ], timeout: 3000);
+      // Trigger detect để xử lý SPA (OTP field xuất hiện mà không có page navigation)
+      if (mounted) await _controller.runJavaScript(_detectOtpFieldJs);
       if (mounted) _setStatus('');
     } catch (_) {
       if (mounted) _setStatus('');
