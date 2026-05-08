@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/account.dart';
 import '../models/lottery_result_entry.dart';
@@ -595,37 +594,60 @@ class _BrowserScreenState extends State<BrowserScreen> {
     return completer.future;
   }
 
+  // MethodChannel để đọc changeCount clipboard mà không đọc nội dung (tránh paste dialog)
+  static const _utilsChannel = MethodChannel('com.pokemonct/utils');
+
   Future<String?> _waitForOtpFromClipboard({
     required Duration timeout,
     String? excludeCode,
   }) async {
     final completer = Completer<String?>();
-    bool checking = false;
     final otpRegex = RegExp(r'^\d{6}$');
+    int lastChangeCount = -1;
 
     void finish(String? code) {
       if (completer.isCompleted) return;
       completer.complete(code);
     }
 
-    Future<void> check() async {
-      if (checking || completer.isCompleted) return;
-      checking = true;
+    // Đọc clipboard 1 lần và trả về nếu có OTP hợp lệ (lần đầu khởi động)
+    Future<void> readClipboard() async {
+      if (completer.isCompleted) return;
       try {
         final data = await Clipboard.getData(Clipboard.kTextPlain);
         final text = data?.text?.trim() ?? '';
         if (otpRegex.hasMatch(text) && text != excludeCode) {
           finish(text);
         }
-      } finally {
-        checking = false;
+      } catch (_) {}
+    }
+
+    // Kiểm tra changeCount — KHÔNG đọc nội dung clipboard → không trigger paste dialog
+    Future<void> checkChangeCount() async {
+      if (completer.isCompleted) return;
+      try {
+        final count = await _utilsChannel.invokeMethod<int>('clipboardChangeCount') ?? -1;
+        if (count != lastChangeCount) {
+          lastChangeCount = count;
+          await readClipboard(); // Chỉ đọc khi clipboard thực sự thay đổi
+        }
+      } catch (_) {
+        // Fallback nếu channel chưa sẵn sàng: đọc trực tiếp
+        await readClipboard();
       }
     }
 
-    await check();
+    // Kiểm tra ngay lần đầu (clipboard có thể đã có OTP từ trước)
+    try {
+      lastChangeCount = await _utilsChannel.invokeMethod<int>('clipboardChangeCount') ?? -1;
+    } catch (_) {}
+    await readClipboard();
     if (completer.isCompleted) return completer.future;
 
-    final pollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) => check());
+    final pollTimer = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) => checkChangeCount(),
+    );
     final timeoutTimer = Timer(timeout, () => finish(null));
     var elapsedSeconds = 0;
     final statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -757,8 +779,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _openMailApp() async {
-    // Mở app Mail gốc iOS
-    await launchUrl(Uri.parse('mailto:'), mode: LaunchMode.externalApplication);
+    try {
+      await _utilsChannel.invokeMethod('openMailApp');
+    } catch (_) {}
   }
 
   Future<void> _autoFill({bool silent = false}) async {
