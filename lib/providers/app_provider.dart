@@ -4,6 +4,7 @@ import '../models/account.dart';
 import '../models/proxy.dart';
 import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
+import '../models/lottery_result_entry.dart';
 import '../services/storage_service.dart';
 import '../services/imap_service.dart';
 
@@ -26,6 +27,7 @@ class AppProvider extends ChangeNotifier {
   bool _shortcut5gEnabled = true;
   String _otpSource = 'clipboard'; // 'imap' or 'clipboard'
   String _targetProductName = '';
+  final List<LotteryResultEntry> _lotteryResults = [];
   bool _loaded = false;
   bool _imapStarting = false;
   bool _imapStopping = false;
@@ -61,6 +63,7 @@ class AppProvider extends ChangeNotifier {
   String get otpSource => _otpSource;
   bool get isClipboardOtpMode => _otpSource == 'clipboard';
   String get targetProductName => _targetProductName;
+  List<LotteryResultEntry> get lotteryResults => List.unmodifiable(_lotteryResults);
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
@@ -267,6 +270,17 @@ class AppProvider extends ChangeNotifier {
   Future<void> setTargetProductName(String name) async {
     _targetProductName = name;
     await _storage.saveTargetProductName(name);
+    notifyListeners();
+  }
+
+  void addLotteryResult(LotteryResultEntry entry) {
+    _lotteryResults.removeWhere((e) => e.accountEmail == entry.accountEmail);
+    _lotteryResults.add(entry);
+    notifyListeners();
+  }
+
+  void clearLotteryResults() {
+    _lotteryResults.clear();
     notifyListeners();
   }
 

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/account.dart';
+import '../models/lottery_result_entry.dart';
 import '../models/otp_entry.dart';
 import '../models/proxy.dart';
 import '../providers/app_provider.dart';
@@ -56,6 +58,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   // Thời điểm bấm ログイン — chỉ lấy OTP gửi SAU thời điểm này
   DateTime? _loginAttemptTime;
 
+  // Lottery result extraction (lotteryResult mode)
+  bool _resultChecked = false;
+  Completer<List<dynamic>>? _extractCompleter;
+
   // Overlay for status text (above iOS platform WebView)
   OverlayEntry? _statusOverlay;
 
@@ -88,6 +94,33 @@ class _BrowserScreenState extends State<BrowserScreen> {
       break;
     }
   }
+})();
+''';
+
+  static const String _extractJs = '''
+(function() {
+  var items = [];
+  var lis = document.querySelectorAll('.comOrderList > li');
+  if (lis.length === 0) {
+    window.FlutterChannel.postMessage(JSON.stringify({type:'lotteryResults',data:[]}));
+    return;
+  }
+  lis.forEach(function(li) {
+    var timeEl = li.querySelector('.time');
+    var ttlEl  = li.querySelector('.ttl');
+    if (!timeEl || !ttlEl) return;
+    var span     = timeEl.querySelector('span');
+    var dateText = timeEl.childNodes[0] ? timeEl.childNodes[0].textContent.trim() : '';
+    var timeText = span ? span.textContent.trim() : '';
+    var won  = li.querySelector('.checkedTxt');
+    var lost = li.querySelector('.endTxt');
+    items.push({
+      title:  ttlEl.textContent.trim(),
+      date:   dateText + ' ' + timeText,
+      result: won ? '当選' : (lost ? '落選' : '未定'),
+    });
+  });
+  window.FlutterChannel.postMessage(JSON.stringify({type:'lotteryResults',data:items}));
 })();
 ''';
 
@@ -319,14 +352,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
               await _autoFill(silent: true);
             }
 
-            // Dùng JS để phát hiện field OTP — không phụ thuộc vào URL
+            // Trigger lottery result extraction khi đã login (lotteryResult mode)
+            if (mounted &&
+                widget.account.mode == AccountMode.lotteryResult &&
+                !_resultChecked &&
+                !_isLoginPage(url)) {
+              _resultChecked = true;
+              unawaited(_performResultCheck());
+            }
+
+            // Dùng JS để phát hiện field OTP — không có 'body' fallback
             await _waitForElement([
               'input#authCode',
               'input[name="dwfrm_factor2Auth_authCode"]',
               'input[name="passcode"]',
               'input[maxlength="6"]',
-              'body',
-            ], timeout: 2000);
+            ], timeout: 3000);
             if (mounted) {
               await _controller.runJavaScript(_detectOtpFieldJs);
             }
@@ -359,6 +400,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
         final token = tokenMatch.group(1)!;
         _domWaitCompleters[token]?.complete();
       }
+      return;
+    }
+
+    // Lottery result extraction response
+    if (message.contains('"type":"lotteryResults"')) {
+      try {
+        final data = jsonDecode(message) as Map<String, dynamic>;
+        final items = (data['data'] as List?) ?? [];
+        if (_extractCompleter?.isCompleted == false) {
+          _extractCompleter!.complete(items);
+        }
+      } catch (_) {}
       return;
     }
 
@@ -610,6 +663,64 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
     setState(() => _otpAutoSubmitting = false);
     _setStatus('Khong co OTP moi sau 90s');
+  }
+
+  Future<void> _performResultCheck() async {
+    if (!mounted) return;
+    final provider = context.read<AppProvider>();
+    final email = widget.account.email;
+    final keyword = provider.targetProductName;
+    final resultUrl = provider.lotteryResultUrl;
+
+    _setStatus('🏆 Đang lấy kết quả lottery...');
+
+    // Navigate to lottery result URL if not already there
+    if (resultUrl.isNotEmpty && !_currentUrl.contains('lottery-history')) {
+      await _controller.loadRequest(Uri.parse(resultUrl));
+      await Future.delayed(const Duration(seconds: 3));
+    }
+
+    // Wait for result list to appear (or timeout)
+    await _waitForElement(['.comOrderList', '.comOrderList > li'], timeout: 5000);
+
+    // Run extraction JS
+    _extractCompleter = Completer<List<dynamic>>();
+    await _controller.runJavaScript(_extractJs);
+
+    List<dynamic> items;
+    try {
+      items = await _extractCompleter!.future.timeout(const Duration(seconds: 10));
+    } catch (_) {
+      _setStatus('❌ Không lấy được kết quả');
+      return;
+    }
+
+    if (items.isEmpty) {
+      provider.addLotteryResult(LotteryResultEntry(
+        accountEmail: email, productTitle: keyword, time: '', result: '結果なし'));
+      _setStatus('⚠️ Không có kết quả trong lottery history');
+      return;
+    }
+
+    final kw = keyword.toLowerCase();
+    for (final item in items) {
+      final title = ((item['title'] as String?) ?? '').toLowerCase();
+      if (kw.isEmpty || title.contains(kw)) {
+        final entry = LotteryResultEntry(
+          accountEmail: email,
+          productTitle: item['title'] as String? ?? '',
+          time: item['date'] as String? ?? '',
+          result: item['result'] as String? ?? '未定',
+        );
+        provider.addLotteryResult(entry);
+        _setStatus(entry.isWon ? '🎉 当選! ${entry.productTitle}' : '😞 落選 ${entry.productTitle}');
+        return;
+      }
+    }
+
+    provider.addLotteryResult(LotteryResultEntry(
+      accountEmail: email, productTitle: keyword, time: '', result: '対象なし'));
+    _setStatus('対象なし — không tìm thấy sản phẩm "$keyword"');
   }
 
   Future<void> _autoFill({bool silent = false}) async {

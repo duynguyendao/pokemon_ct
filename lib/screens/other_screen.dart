@@ -1,16 +1,11 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import '../models/account.dart';
 import '../models/lottery_result_entry.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
-import '../utils/device_profiles.dart';
 
 class OtherScreen extends StatefulWidget {
   const OtherScreen({super.key});
@@ -25,87 +20,34 @@ class _OtherScreenState extends State<OtherScreen>
   late TextEditingController _productCtrl;
   late TextEditingController _searchCtrl;
 
-  // Checker state
-  bool _checking = false;
-  bool _stopRequested = false;
-  int _checkedCount = 0;
-  int _totalCount = 0;
-  String _statusText = '';
-
-  final List<LotteryResultEntry> _results = [];
-
   // Table filter / sort state
   String? _filterResult; // null = all, '当選', '落選', 'エラー'
   bool _sortWonFirst = false;
 
-  // WebView
-  WebViewController? _wv;
-  String _wvUrl = '';
-  Completer<void>? _pageLoadCompleter;
-  Completer<List<dynamic>>? _extractCompleter;
-  Completer<bool>? _otpFieldCompleter;
-
-  static const _extractJs = '''
-(function() {
-  var items = [];
-  var lis = document.querySelectorAll('.comOrderList > li');
-  if (lis.length === 0) {
-    window.FlutterChannel.postMessage(JSON.stringify({type:'lotteryResults',data:[]}));
-    return;
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
+    final p = context.read<AppProvider>();
+    _productCtrl = TextEditingController(text: p.targetProductName);
+    _searchCtrl = TextEditingController();
+    _searchCtrl.addListener(() => setState(() {}));
   }
-  lis.forEach(function(li) {
-    var timeEl = li.querySelector('.time');
-    var ttlEl  = li.querySelector('.ttl');
-    if (!timeEl || !ttlEl) return;
-    var span     = timeEl.querySelector('span');
-    var dateText = timeEl.childNodes[0] ? timeEl.childNodes[0].textContent.trim() : '';
-    var timeText = span ? span.textContent.trim() : '';
-    var won      = li.querySelector('.checkedTxt');
-    var lost     = li.querySelector('.endTxt');
-    items.push({
-      title:  ttlEl.textContent.trim(),
-      date:   dateText + ' ' + timeText,
-      result: won ? '当選' : (lost ? '落選' : '未定'),
-    });
-  });
-  window.FlutterChannel.postMessage(JSON.stringify({type:'lotteryResults', data:items}));
-})();
-''';
 
-  static const _checkOtpFieldJs = '''
-(function() {
-  var selectors = [
-    'input#authCode','input[name="dwfrm_factor2Auth_authCode"]',
-    'input[name="passcode"]','input[name="otp"]','input[maxlength="6"]'
-  ];
-  var found = selectors.some(function(s){ return !!document.querySelector(s); });
-  window.FlutterChannel.postMessage(JSON.stringify({type:'otpFieldCheck',found:found}));
-})();
-''';
-
-  static const _loginClickJs = '''
-(function() {
-  var btn = document.querySelector('a.loginBtn, a.btn.loginBtn');
-  if (btn) { btn.click(); return; }
-  var all = Array.from(document.querySelectorAll('button,input[type="submit"],a[role="button"],a.btn'));
-  for (var i = 0; i < all.length; i++) {
-    var t = (all[i].textContent || all[i].value || '').trim();
-    if (t.indexOf('ログイン') >= 0 || t.indexOf('送信') >= 0 ||
-        t.toLowerCase().indexOf('login') >= 0 || t.toLowerCase().indexOf('sign in') >= 0) {
-      all[i].click(); return;
-    }
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    _productCtrl.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
   }
-})();
-''';
 
   // ─── Computed ──────────────────────────────────────────────────────────────
 
-  List<LotteryResultEntry> get _filteredResults {
-    var list = _results.where((e) {
-      final searchQ = _searchCtrl.text.trim().toLowerCase();
-      if (searchQ.isNotEmpty && !e.accountEmail.toLowerCase().contains(searchQ)) {
-        return false;
-      }
+  List<LotteryResultEntry> _filtered(List<LotteryResultEntry> all) {
+    var list = all.where((e) {
+      final q = _searchCtrl.text.trim().toLowerCase();
+      if (q.isNotEmpty && !e.accountEmail.toLowerCase().contains(q)) return false;
       if (_filterResult != null) {
         if (_filterResult == 'エラー') {
           if (!e.isError) return false;
@@ -126,326 +68,6 @@ class _OtherScreenState extends State<OtherScreen>
     return list;
   }
 
-  List<LotteryResultEntry> get _errorResults =>
-      _results.where((e) => e.isError).toList();
-
-  @override
-  void initState() {
-    super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
-    final p = context.read<AppProvider>();
-    _productCtrl = TextEditingController(text: p.targetProductName);
-    _searchCtrl = TextEditingController();
-    _searchCtrl.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _tabCtrl.dispose();
-    _productCtrl.dispose();
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
-  // ─── WebView init ──────────────────────────────────────────────────────────
-
-  void _initWebView() {
-    _wv = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (url) {
-          _wvUrl = url;
-        },
-        onPageFinished: (url) {
-          _wvUrl = url;
-          if (_pageLoadCompleter?.isCompleted == false) {
-            _pageLoadCompleter!.complete();
-          }
-        },
-        onWebResourceError: (_) {
-          if (_pageLoadCompleter?.isCompleted == false) {
-            _pageLoadCompleter!.complete();
-          }
-        },
-      ))
-      ..addJavaScriptChannel('FlutterChannel', onMessageReceived: (msg) {
-        _handleJs(msg.message);
-      });
-  }
-
-  void _handleJs(String message) {
-    try {
-      final data = jsonDecode(message) as Map<String, dynamic>;
-      final type = data['type'] as String?;
-      if (type == 'lotteryResults') {
-        final items = (data['data'] as List?) ?? [];
-        if (_extractCompleter?.isCompleted == false) {
-          _extractCompleter!.complete(items);
-        }
-      } else if (type == 'otpFieldCheck') {
-        if (_otpFieldCompleter?.isCompleted == false) {
-          _otpFieldCompleter!.complete(data['found'] == true);
-        }
-      }
-    } catch (_) {}
-  }
-
-  // ─── Helpers ───────────────────────────────────────────────────────────────
-
-  Future<void> _loadPage(String url) async {
-    _pageLoadCompleter = Completer<void>();
-    await _wv!.loadRequest(Uri.parse(url));
-    try {
-      await _pageLoadCompleter!.future.timeout(const Duration(seconds: 20));
-    } catch (_) {}
-  }
-
-  LotteryResultEntry _errEntry(String email, String keyword, String reason) =>
-      LotteryResultEntry(
-        accountEmail: email,
-        productTitle: keyword,
-        time: '',
-        result: reason,
-      );
-
-  Future<bool> _checkForOtpField() async {
-    if (_wv == null) return false;
-    _otpFieldCompleter = Completer<bool>();
-    await _wv!.runJavaScript(_checkOtpFieldJs);
-    return _otpFieldCompleter!.future.timeout(
-      const Duration(milliseconds: 800),
-      onTimeout: () => false,
-    );
-  }
-
-  Future<String?> _waitForClipboardOtp({required Duration timeout}) async {
-    final regex = RegExp(r'^\d{6}$');
-    final completer = Completer<String?>();
-    bool checking = false;
-
-    void finish(String? code) {
-      if (completer.isCompleted) return;
-      completer.complete(code);
-    }
-
-    Future<void> poll() async {
-      if (checking || completer.isCompleted) return;
-      checking = true;
-      try {
-        final data = await Clipboard.getData(Clipboard.kTextPlain);
-        final text = data?.text?.trim() ?? '';
-        if (regex.hasMatch(text)) finish(text);
-      } finally {
-        checking = false;
-      }
-    }
-
-    await poll();
-    if (completer.isCompleted) return completer.future;
-
-    final pollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) => poll());
-    final timeoutTimer = Timer(timeout, () => finish(null));
-    var elapsed = 0;
-    final statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      elapsed += 5;
-      if (mounted && !completer.isCompleted) {
-        setState(() => _statusText = '${_statusText.split('\n').first}\n📋 Chờ OTP clipboard... $elapsed/${timeout.inSeconds}s');
-      }
-    });
-
-    final result = await completer.future;
-    pollTimer.cancel();
-    timeoutTimer.cancel();
-    statusTimer.cancel();
-    return result;
-  }
-
-  void _snack(String msg, {Duration duration = const Duration(seconds: 2)}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg), duration: duration));
-  }
-
-  // ─── Checking logic ────────────────────────────────────────────────────────
-
-  Future<void> _startChecking({List<Account>? overrideAccounts}) async {
-    final p = context.read<AppProvider>();
-    final keyword = _productCtrl.text.trim();
-    await p.setTargetProductName(keyword);
-
-    final accounts = overrideAccounts ??
-        p.accounts.where((a) => a.status == 'todo').toList();
-
-    if (accounts.isEmpty) {
-      if (!mounted) return;
-      _snack('Không có account nào để check');
-      return;
-    }
-
-    _initWebView();
-
-    setState(() {
-      _checking = true;
-      _stopRequested = false;
-      if (overrideAccounts == null) _results.clear();
-      _checkedCount = 0;
-      _totalCount = accounts.length;
-      _statusText = 'Bắt đầu...';
-    });
-
-    for (final account in accounts) {
-      if (_stopRequested || !mounted) break;
-
-      setState(() {
-        _statusText = 'Đang check: ${account.email}';
-      });
-
-      LotteryResultEntry entry;
-      try {
-        entry = await _checkAccount(account, p, keyword)
-            .timeout(const Duration(seconds: 150));
-      } on TimeoutException {
-        entry = _errEntry(account.email, keyword, 'Timeout');
-      } catch (_) {
-        entry = _errEntry(account.email, keyword, 'エラー');
-      }
-
-      if (mounted) {
-        setState(() {
-          // Replace existing entry for this email if re-checking
-          if (overrideAccounts != null) {
-            final idx =
-                _results.indexWhere((r) => r.accountEmail == account.email);
-            if (idx >= 0) {
-              _results[idx] = entry;
-            } else {
-              _results.add(entry);
-            }
-          } else {
-            _results.add(entry);
-          }
-          _checkedCount++;
-        });
-      }
-    }
-
-    if (mounted) {
-      setState(() {
-        _checking = false;
-        _statusText = '完了 $_checkedCount/${accounts.length}';
-      });
-    }
-  }
-
-  Future<void> _recheckFailed() async {
-    final p = context.read<AppProvider>();
-    final errorEmails = _errorResults.map((e) => e.accountEmail).toSet();
-    final accounts = p.accounts
-        .where((a) => errorEmails.contains(a.email))
-        .toList();
-    await _startChecking(overrideAccounts: accounts);
-  }
-
-  Future<LotteryResultEntry> _checkAccount(
-      Account account, AppProvider p, String keyword) async {
-    final loginUrl = p.loginUrl;
-    final historyUrl = p.lotteryResultUrl;
-
-    setState(() => _statusText = '${account.email}\nLogin page...');
-    await _loadPage(loginUrl);
-    await Future.delayed(const Duration(milliseconds: 600));
-
-    setState(() => _statusText = '${account.email}\nĐiền email/password...');
-    await _wv!.runJavaScript(buildAutoFillScript(account.email, account.password));
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    await _wv!.runJavaScript(_loginClickJs);
-
-    // Wait for EITHER: URL leaves /login  OR  OTP field appears
-    setState(() => _statusText = '${account.email}\nĐăng nhập...');
-    bool loginResolved = false;
-    final loginDeadline = DateTime.now().add(const Duration(seconds: 30));
-
-    while (DateTime.now().isBefore(loginDeadline)) {
-      if (!mounted || _stopRequested) return _errEntry(account.email, keyword, 'Stopped');
-
-      // URL already left login → success without OTP
-      if (!_wvUrl.contains('/login')) {
-        loginResolved = true;
-        break;
-      }
-
-      // Check if OTP field appeared
-      final hasOtp = await _checkForOtpField();
-      if (hasOtp) {
-        setState(() => _statusText = '${account.email}\n📋 Chờ OTP clipboard...');
-        final otp = await _waitForClipboardOtp(timeout: const Duration(seconds: 60));
-        if (otp == null) return _errEntry(account.email, keyword, 'OTP Timeout');
-
-        // Fill + submit OTP
-        setState(() => _statusText = '${account.email}\n🔢 Điền OTP $otp...');
-        await _wv!.runJavaScript(buildOtpAutoSubmitScript(otp));
-        await Clipboard.setData(const ClipboardData(text: ''));
-        await Future.delayed(const Duration(seconds: 2));
-
-        // Wait for OTP page to pass (field gone or URL changed)
-        final otpDeadline = DateTime.now().add(const Duration(seconds: 20));
-        while (DateTime.now().isBefore(otpDeadline)) {
-          if (!mounted || _stopRequested) return _errEntry(account.email, keyword, 'Stopped');
-          final stillOtp = await _checkForOtpField();
-          if (!stillOtp) { loginResolved = true; break; }
-          await Future.delayed(const Duration(milliseconds: 500));
-        }
-        break;
-      }
-
-      await Future.delayed(const Duration(milliseconds: 500));
-    }
-
-    if (!loginResolved) return _errEntry(account.email, keyword, 'ログイン失敗');
-
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    setState(() => _statusText = '${account.email}\nLottery history...');
-    await _loadPage(historyUrl);
-    await Future.delayed(const Duration(milliseconds: 600));
-
-    if (_wvUrl.contains('/login')) {
-      return _errEntry(account.email, keyword, 'ログイン失敗');
-    }
-
-    setState(() => _statusText = '${account.email}\nExtracting...');
-    _extractCompleter = Completer<List<dynamic>>();
-    await _wv!.runJavaScript(_extractJs);
-
-    List<dynamic> items;
-    try {
-      items = await _extractCompleter!.future
-          .timeout(const Duration(seconds: 10));
-    } catch (_) {
-      return _errEntry(account.email, keyword, 'Extract失敗');
-    }
-
-    if (items.isEmpty) {
-      return _errEntry(account.email, keyword, '結果なし');
-    }
-
-    final kw = keyword.toLowerCase();
-    for (final item in items) {
-      final title = ((item['title'] as String?) ?? '').toLowerCase();
-      if (kw.isEmpty || title.contains(kw)) {
-        return LotteryResultEntry(
-          accountEmail: account.email,
-          productTitle: item['title'] as String? ?? '',
-          time: item['date'] as String? ?? '',
-          result: item['result'] as String? ?? '未定',
-        );
-      }
-    }
-
-    return _errEntry(account.email, keyword, '対象なし');
-  }
-
   // ─── CSV / Export ──────────────────────────────────────────────────────────
 
   String _buildCsv(List<LotteryResultEntry> rows) {
@@ -456,18 +78,14 @@ class _OtherScreenState extends State<OtherScreen>
     return lines.join('\n');
   }
 
-  void _copyResultsCsv() {
-    final csv = _buildCsv(_filteredResults);
-    Clipboard.setData(ClipboardData(text: csv));
-    _snack('Đã copy ${_filteredResults.length} dòng CSV');
+  void _copyResultsCsv(List<LotteryResultEntry> rows) {
+    Clipboard.setData(ClipboardData(text: _buildCsv(rows)));
+    _snack('Đã copy ${rows.length} dòng CSV');
   }
 
-  Future<void> _exportCsvFile() async {
-    final csv = _buildCsv(_filteredResults);
-    final ts = DateTime.now()
-        .toIso8601String()
-        .replaceAll(':', '-')
-        .substring(0, 19);
+  Future<void> _exportCsvFile(List<LotteryResultEntry> rows) async {
+    final csv = _buildCsv(rows);
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-').substring(0, 19);
     final file = File('${Directory.systemTemp.path}/lottery_results_$ts.csv');
     await file.writeAsString(csv);
     await Share.shareXFiles(
@@ -476,14 +94,20 @@ class _OtherScreenState extends State<OtherScreen>
     );
   }
 
-  void _copyWonEmails() {
-    final won = _filteredResults.where((r) => r.isWon).map((r) => r.accountEmail).join('\n');
+  void _copyWonEmails(List<LotteryResultEntry> rows) {
+    final won = rows.where((r) => r.isWon).map((r) => r.accountEmail).join('\n');
     if (won.isEmpty) {
       _snack('Không có 当選 trong danh sách hiện tại');
       return;
     }
     Clipboard.setData(ClipboardData(text: won));
     _snack('Đã copy email 当選');
+  }
+
+  void _snack(String msg, {Duration duration = const Duration(seconds: 2)}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg), duration: duration));
   }
 
   // ─── Build ─────────────────────────────────────────────────────────────────
@@ -517,99 +141,26 @@ class _OtherScreenState extends State<OtherScreen>
   }
 
   Widget _buildLotteryResultTab() {
-    if (_checking && _wv != null) {
-      return Stack(
-        children: [
-          WebViewWidget(controller: _wv!),
-          Container(
-            color: Colors.black.withAlpha(200),
-            child: SafeArea(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: CircularProgressIndicator(color: AppColors.primary),
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    '$_checkedCount / $_totalCount',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                    child: Text(
-                      _statusText,
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 13,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  if (_results.isNotEmpty) ...[
-                    const Text(
-                      'Kết quả đến hiện tại:',
-                      style: TextStyle(
-                          color: AppColors.textSecondary, fontSize: 12),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      constraints: const BoxConstraints(maxHeight: 200),
-                      decoration: BoxDecoration(
-                        color: AppColors.card,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: ListView.builder(
-                        padding: const EdgeInsets.all(8),
-                        itemCount: _results.length,
-                        itemBuilder: (_, i) =>
-                            _buildCompactResultRow(_results[i]),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: () =>
-                        setState(() => _stopRequested = true),
-                    icon: const Icon(Icons.stop, size: 18),
-                    label: const Text('Dừng'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.error,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+    return Consumer<AppProvider>(
+      builder: (context, p, _) {
+        final all = p.lotteryResults;
+        final rows = _filtered(all);
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildKeywordCard(p),
+              const SizedBox(height: 16),
+              if (all.isNotEmpty) _buildResultsSection(p, all, rows),
+            ],
           ),
-        ],
-      );
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildSettingsCard(),
-          const SizedBox(height: 16),
-          if (_results.isNotEmpty) _buildResultsSection(),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildSettingsCard() {
-    final p = context.watch<AppProvider>();
-    final todoCount = p.accounts.where((a) => a.status == 'todo').length;
+  Widget _buildKeywordCard(AppProvider p) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -617,12 +168,17 @@ class _OtherScreenState extends State<OtherScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Lọc kết quả Lottery',
+              'Từ khóa sản phẩm',
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
               ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Set keyword → đổi mode account sang Result → Start All để check',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -639,49 +195,20 @@ class _OtherScreenState extends State<OtherScreen>
                     ? IconButton(
                         icon: const Icon(Icons.clear,
                             color: AppColors.textSecondary, size: 16),
-                        onPressed: () =>
-                            setState(() => _productCtrl.clear()),
+                        onPressed: () => setState(() => _productCtrl.clear()),
                       )
                     : null,
               ),
-              onChanged: (_) => setState(() {}),
+              onChanged: (v) {
+                setState(() {});
+                p.setTargetProductName(v.trim());
+              },
             ),
             const SizedBox(height: 8),
             Text(
-              'URL: ${p.lotteryResultUrl}',
+              'Result URL: ${p.lotteryResultUrl}',
               style: const TextStyle(
                   color: AppColors.textSecondary, fontSize: 11),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _checking ? null : _startChecking,
-                    icon: const Icon(Icons.play_circle_outline, size: 18),
-                    label: Text('Check $todoCount accounts (TODO)'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      minimumSize: const Size(0, 48),
-                    ),
-                  ),
-                ),
-                if (_errorResults.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Tooltip(
-                    message: 'Re-check ${_errorResults.length} lỗi',
-                    child: ElevatedButton(
-                      onPressed: _checking ? null : _recheckFailed,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.warning,
-                        minimumSize: const Size(48, 48),
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: const Icon(Icons.refresh, size: 20),
-                    ),
-                  ),
-                ],
-              ],
             ),
           ],
         ),
@@ -689,24 +216,24 @@ class _OtherScreenState extends State<OtherScreen>
     );
   }
 
-  // ─── Results section (filter bar + table) ─────────────────────────────────
+  // ─── Results section ───────────────────────────────────────────────────────
 
-  Widget _buildResultsSection() {
-    final filtered = _filteredResults;
-    final wonCount = _results.where((r) => r.isWon).length;
-    final lostCount = _results.where((r) => r.isLost).length;
-    final errCount = _errorResults.length;
+  Widget _buildResultsSection(
+      AppProvider p, List<LotteryResultEntry> all, List<LotteryResultEntry> rows) {
+    final wonCount = all.where((r) => r.isWon).length;
+    final lostCount = all.where((r) => r.isLost).length;
+    final errCount = all.where((r) => r.isError).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Summary row ──
+        // Summary row
         Row(
           children: [
             Text(
-              filtered.length == _results.length
-                  ? '${_results.length} kết quả'
-                  : '${filtered.length} / ${_results.length}',
+              rows.length == all.length
+                  ? '${all.length} kết quả'
+                  : '${rows.length} / ${all.length}',
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -722,33 +249,29 @@ class _OtherScreenState extends State<OtherScreen>
               _chip('エラー $errCount', AppColors.warning),
             ],
             const Spacer(),
-            // Sort toggle
             Tooltip(
-              message: _sortWonFirst ? 'Đang sort: 当選 trên' : 'Sort 当選 lên trên',
+              message: _sortWonFirst ? 'Sort: 当選 trên' : 'Sort 当選 lên trên',
               child: IconButton(
-                icon: Icon(
-                  Icons.sort,
-                  color: _sortWonFirst
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
-                  size: 20,
-                ),
-                onPressed: () =>
-                    setState(() => _sortWonFirst = !_sortWonFirst),
+                icon: Icon(Icons.sort,
+                    color: _sortWonFirst
+                        ? AppColors.primary
+                        : AppColors.textSecondary,
+                    size: 20),
+                onPressed: () => setState(() => _sortWonFirst = !_sortWonFirst),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
 
-        // ── Search by email ──
+        // Search by email
         TextField(
           controller: _searchCtrl,
           style: const TextStyle(color: Colors.white, fontSize: 13),
           decoration: InputDecoration(
             hintText: 'Tìm theo email...',
-            hintStyle:
-                const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            hintStyle: const TextStyle(
+                color: AppColors.textSecondary, fontSize: 12),
             prefixIcon: const Icon(Icons.search,
                 color: AppColors.textSecondary, size: 18),
             suffixIcon: _searchCtrl.text.isNotEmpty
@@ -764,7 +287,7 @@ class _OtherScreenState extends State<OtherScreen>
         ),
         const SizedBox(height: 8),
 
-        // ── Filter chips ──
+        // Filter chips
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
@@ -781,45 +304,46 @@ class _OtherScreenState extends State<OtherScreen>
         ),
         const SizedBox(height: 10),
 
-        // ── Action buttons ──
+        // Action buttons
         Row(
           children: [
             IconButton(
               icon: const Icon(Icons.copy_all,
                   color: AppColors.textSecondary, size: 20),
               tooltip: 'Copy CSV (filtered)',
-              onPressed: _copyResultsCsv,
+              onPressed: () => _copyResultsCsv(rows),
             ),
             IconButton(
               icon: const Icon(Icons.ios_share,
                   color: AppColors.textSecondary, size: 20),
               tooltip: 'Export file CSV',
-              onPressed: _exportCsvFile,
+              onPressed: () => _exportCsvFile(rows),
             ),
-            if (filtered.any((r) => r.isWon))
+            if (rows.any((r) => r.isWon))
               IconButton(
                 icon: const Icon(Icons.emoji_events,
                     color: AppColors.done, size: 20),
                 tooltip: 'Copy email 当選',
-                onPressed: _copyWonEmails,
+                onPressed: () => _copyWonEmails(rows),
               ),
-            if (_results.isNotEmpty)
-              IconButton(
-                icon: const Icon(Icons.delete_outline,
-                    color: AppColors.error, size: 20),
-                tooltip: 'Xóa tất cả',
-                onPressed: () => setState(() {
-                  _results.clear();
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: AppColors.error, size: 20),
+              tooltip: 'Xóa tất cả',
+              onPressed: () {
+                p.clearLotteryResults();
+                setState(() {
                   _filterResult = null;
                   _searchCtrl.clear();
-                }),
-              ),
+                });
+              },
+            ),
           ],
         ),
         const SizedBox(height: 6),
 
-        // ── Table ──
-        _buildTable(filtered),
+        // Table
+        _buildTable(rows),
       ],
     );
   }
@@ -879,7 +403,6 @@ class _OtherScreenState extends State<OtherScreen>
 
     return Column(
       children: [
-        // Header
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
@@ -955,53 +478,43 @@ class _OtherScreenState extends State<OtherScreen>
     return GestureDetector(
       onLongPress: () {
         Clipboard.setData(ClipboardData(
-            text:
-                '${e.accountEmail},${e.productTitle},${e.time},${e.result}'));
+            text: '${e.accountEmail},${e.productTitle},${e.time},${e.result}'));
         _snack('Copied row', duration: const Duration(seconds: 1));
       },
       child: Container(
         color: e.isWon ? AppColors.done.withAlpha(15) : Colors.transparent,
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
             Expanded(
               flex: 3,
-              child: Text(
-                e.accountEmail,
-                style:
-                    const TextStyle(color: Colors.white, fontSize: 11),
-                overflow: TextOverflow.ellipsis,
-              ),
+              child: Text(e.accountEmail,
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                  overflow: TextOverflow.ellipsis),
             ),
             Expanded(
               flex: 3,
-              child: Text(
-                e.productTitle.isEmpty ? '—' : e.productTitle,
-                style: const TextStyle(
-                    color: AppColors.textSecondary, fontSize: 11),
-                overflow: TextOverflow.ellipsis,
-              ),
+              child: Text(e.productTitle.isEmpty ? '—' : e.productTitle,
+                  style: const TextStyle(
+                      color: AppColors.textSecondary, fontSize: 11),
+                  overflow: TextOverflow.ellipsis),
             ),
             Expanded(
               flex: 2,
-              child: Text(
-                e.time.isEmpty ? '—' : e.time,
-                style: const TextStyle(
-                    color: AppColors.textSecondary, fontSize: 10),
-                overflow: TextOverflow.ellipsis,
-              ),
+              child: Text(e.time.isEmpty ? '—' : e.time,
+                  style: const TextStyle(
+                      color: AppColors.textSecondary, fontSize: 10),
+                  overflow: TextOverflow.ellipsis),
             ),
             SizedBox(
               width: 64,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 3),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                 decoration: BoxDecoration(
                   color: resultColor.withAlpha(30),
                   borderRadius: BorderRadius.circular(6),
-                  border:
-                      Border.all(color: resultColor.withAlpha(120)),
+                  border: Border.all(color: resultColor.withAlpha(120)),
                 ),
                 child: Text(
                   e.result,
@@ -1020,38 +533,8 @@ class _OtherScreenState extends State<OtherScreen>
     );
   }
 
-  Widget _buildCompactResultRow(LotteryResultEntry e) {
-    final c = e.isWon
-        ? AppColors.done
-        : e.isLost
-            ? AppColors.error
-            : AppColors.textSecondary;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              e.accountEmail,
-              style:
-                  const TextStyle(color: Colors.white, fontSize: 11),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(e.result,
-              style: TextStyle(
-                  color: c,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
   Widget _chip(String label, Color color) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           color: color.withAlpha(30),
           borderRadius: BorderRadius.circular(6),
@@ -1059,9 +542,7 @@ class _OtherScreenState extends State<OtherScreen>
         ),
         child: Text(label,
             style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: FontWeight.bold)),
+                color: color, fontSize: 11, fontWeight: FontWeight.bold)),
       );
 
   Widget _buildOrderStatusTab() {
