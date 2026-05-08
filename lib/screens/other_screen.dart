@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -70,12 +71,21 @@ class _OtherScreenState extends State<OtherScreen>
 
   // ─── CSV / Export ──────────────────────────────────────────────────────────
 
+  // Escape 1 field CSV: bao bằng nháy kép, escape " thành ""
+  String _csvField(String v) => '"${v.replaceAll('"', '""')}"';
+
   String _buildCsv(List<LotteryResultEntry> rows) {
-    final lines = ['Email,Hàng,Thời gian,Kết quả'];
+    final lines = ['Email,商品名,日時,結果'];
     for (final r in rows) {
-      lines.add('"${r.accountEmail}","${r.productTitle}","${r.time}","${r.result}"');
+      lines.add([
+        _csvField(r.accountEmail),
+        _csvField(r.productTitle),
+        _csvField(r.time),
+        _csvField(r.result),
+      ].join(','));
     }
-    return lines.join('\n');
+    // \r\n line endings — Excel/Numbers đọc chuẩn hơn
+    return lines.join('\r\n');
   }
 
   void _copyResultsCsv(List<LotteryResultEntry> rows) {
@@ -87,9 +97,11 @@ class _OtherScreenState extends State<OtherScreen>
     final csv = _buildCsv(rows);
     final ts = DateTime.now().toIso8601String().replaceAll(':', '-').substring(0, 19);
     final file = File('${Directory.systemTemp.path}/lottery_results_$ts.csv');
-    await file.writeAsString(csv);
+    // UTF-8 BOM (0xEF 0xBB 0xBF) + nội dung → Excel/Numbers nhận đúng encoding tiếng Nhật
+    const bom = [0xEF, 0xBB, 0xBF];
+    await file.writeAsBytes([...bom, ...utf8.encode(csv)]);
     await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'text/csv')],
+      [XFile(file.path, mimeType: 'text/csv; charset=utf-8')],
       subject: 'Lottery Results $ts',
     );
   }
