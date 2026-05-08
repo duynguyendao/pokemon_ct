@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/account.dart';
 import '../models/lottery_result_entry.dart';
@@ -447,6 +448,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
         _lastOtpPageUrl = _currentUrl;
         _otpRetryCount = 0;
         _setStatus('📡 Đang lấy OTP...');
+        // Clipboard mode: mở app Mail để user thấy email chứa OTP
+        if (context.read<AppProvider>().isClipboardOtpMode) {
+          unawaited(_openMailApp());
+        }
         unawaited(_autoSubmitOtp());
       }
       return;
@@ -749,6 +754,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _setStatus('対象なし — không tìm thấy sản phẩm "$keyword"');
     await Future.delayed(const Duration(seconds: 2));
     if (mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _openMailApp() async {
+    // Thử mở Gmail app trước, fallback về mailto: (mở app mail mặc định)
+    final gmail = Uri.parse('googlegmail://');
+    if (await canLaunchUrl(gmail)) {
+      await launchUrl(gmail, mode: LaunchMode.externalApplication);
+      return;
+    }
+    final mailto = Uri.parse('mailto:');
+    if (await canLaunchUrl(mailto)) {
+      await launchUrl(mailto, mode: LaunchMode.externalApplication);
+    }
   }
 
   Future<void> _autoFill({bool silent = false}) async {
