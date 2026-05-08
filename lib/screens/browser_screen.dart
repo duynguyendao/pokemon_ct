@@ -9,6 +9,7 @@ import '../models/lottery_result_entry.dart';
 import '../models/otp_entry.dart';
 import '../models/proxy.dart';
 import '../providers/app_provider.dart';
+import '../services/shortcut_service.dart';
 import '../utils/app_theme.dart';
 import '../utils/device_profiles.dart';
 
@@ -36,7 +37,7 @@ class BrowserScreen extends StatefulWidget {
 
 class _BrowserScreenState extends State<BrowserScreen> {
   late final WebViewController _controller;
-  late final DeviceProfile _profile;
+  late DeviceProfile _profile; // mutable — đổi khi bị captcha
   bool _loading = true;
   String _currentUrl = '';
   bool _canGoBack = false;
@@ -62,6 +63,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _resultChecked = false;
   bool _pendingResultNavigation = false;
   Completer<List<dynamic>>? _extractCompleter;
+
+  // reCAPTCHA / blocked page recovery
+  int _captchaRetryCount = 0;
+  static const int _maxCaptchaRetries = 3;
 
   // Overlay for status text (above iOS platform WebView)
   OverlayEntry? _statusOverlay;
@@ -122,6 +127,36 @@ class _BrowserScreenState extends State<BrowserScreen> {
     });
   });
   window.FlutterChannel.postMessage(JSON.stringify({type:'lotteryResults',data:items}));
+})();
+''';
+
+  // Phát hiện reCAPTCHA / trang bị block — KHÔNG chạy trên trang OTP
+  static const String _captchaDetectJs = '''
+(function() {
+  // Bỏ qua nếu đang ở trang OTP
+  var otpSels = ['input#authCode','input[name="dwfrm_factor2Auth_authCode"]','input[maxlength="6"]','input[name="passcode"]'];
+  for (var i = 0; i < otpSels.length; i++) {
+    if (document.querySelector(otpSels[i])) return;
+  }
+  // reCAPTCHA element visible
+  var cap = document.querySelector('.g-recaptcha,[data-sitekey],iframe[src*="recaptcha"],iframe[src*="captcha"]');
+  if (cap && cap.offsetParent !== null) {
+    window.FlutterChannel.postMessage('{"type":"captchaError","reason":"element"}');
+    return;
+  }
+  // Error messages đặc trưng của Pokémon Center
+  var kws = [
+    'reCAPTCHA 認証失敗','reCAPTCHA認証','認証に失敗',
+    'エラーが発生しました','システムエラー',
+    'アクセスが一時的に制限','ロボットではありません',
+  ];
+  var text = document.body ? document.body.innerText : '';
+  for (var j = 0; j < kws.length; j++) {
+    if (text.indexOf(kws[j]) >= 0) {
+      window.FlutterChannel.postMessage(JSON.stringify({type:'captchaError',reason:kws[j]}));
+      return;
+    }
+  }
 })();
 ''';
 
@@ -399,6 +434,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ], timeout: 3000);
             if (mounted) {
               await _controller.runJavaScript(_detectOtpFieldJs);
+              // Phát hiện reCAPTCHA / trang bị block (chạy sau OTP detect)
+              await _controller.runJavaScript(_captchaDetectJs);
             }
           },
           onWebResourceError: (_) => setState(() => _loading = false),
@@ -442,6 +479,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // OTP field phát hiện → auto submit
     if (message.contains('"type":"otpField"') &&
         message.contains('"detected":true')) {
+      // Login thành công → reset captcha retry counter
+      _captchaRetryCount = 0;
       // Chỉ trigger 1 lần cho mỗi URL để tránh spam
       if (!_otpAutoSubmitting && _lastOtpPageUrl != _currentUrl) {
         _lastOtpPageUrl = _currentUrl;
@@ -452,6 +491,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
           unawaited(_openMailApp());
         }
         unawaited(_autoSubmitOtp());
+      }
+      return;
+    }
+
+    // reCAPTCHA / trang bị block → clear cookies + đổi UA + 5G + retry
+    if (message.contains('"type":"captchaError"')) {
+      if (!_otpAutoSubmitting &&
+          !_resultChecked &&
+          _captchaRetryCount < _maxCaptchaRetries) {
+        unawaited(_recoverAndRetry());
       }
       return;
     }
@@ -776,6 +825,48 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _setStatus('対象なし — không tìm thấy sản phẩm "$keyword"');
     await Future.delayed(const Duration(seconds: 2));
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// reCAPTCHA / block detected: clear cookies → đổi UA → 5G → retry login
+  Future<void> _recoverAndRetry() async {
+    if (!mounted) return;
+    _captchaRetryCount++;
+    _setStatus('🛡️ reCAPTCHA detected — reset lần $_captchaRetryCount/$_maxCaptchaRetries...');
+
+    // 1. Xóa cookies + storage
+    await WebViewCookieManager().clearCookies();
+    await _controller.runJavaScript(
+      'try{localStorage.clear();sessionStorage.clear();}catch(e){};'
+      'window.__fpPatched=false;',
+    );
+
+    // 2. Đổi sang device profile mới
+    setState(() {
+      _profile = randomProfile();
+      _lastAutoFillUrl = null;
+      _lastOtpPageUrl = null;
+      _otpAutoSubmitting = false;
+      _loginAttemptTime = null;
+    });
+    await _controller.setCustomUserAgent(_profile.userAgent);
+
+    final p = context.read<AppProvider>();
+
+    // 3. Đổi 5G nếu được bật
+    if (p.shortcut5gEnabled) {
+      _setStatus('⚡ Đổi 5G...');
+      await ShortcutService.triggerShortcut('5G');
+      await Future.delayed(const Duration(seconds: 5));
+    } else {
+      // Delay ngắn để tránh rate-limit
+      await Future.delayed(const Duration(seconds: 3));
+    }
+
+    if (!mounted) return;
+
+    // 4. Reload trang login
+    _setStatus('🔃 Login lại...');
+    await _controller.loadRequest(Uri.parse(p.loginUrl));
   }
 
   Future<void> _openMailApp() async {

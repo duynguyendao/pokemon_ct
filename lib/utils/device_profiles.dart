@@ -286,6 +286,17 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       ? 'def(nav, "standalone", false);'
       : '';
 
+  // Chrome/Android — extract version + model for userAgentData
+  final chromeMatch = RegExp(r'Chrome/(\d+)').firstMatch(p.userAgent);
+  final chromeVersion = chromeMatch?.group(1) ?? '136';
+  final androidVerMatch = RegExp(r'Android (\d+)').firstMatch(p.userAgent);
+  final androidVersion = androidVerMatch?.group(1) ?? '15';
+  final parenMatch = RegExp(r'\(([^)]+)\)').firstMatch(p.userAgent);
+  final parenParts = (parenMatch?.group(1) ?? '').split(';');
+  final androidModel = isSafari
+      ? ''
+      : (parenParts.length >= 3 ? parenParts[2].trim() : '');
+
   return '''
 (function() {
   if (window.__fpPatched) return;
@@ -367,8 +378,9 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         let s = SEED;
         for (let i = 0; i < img.data.length; i += 4) {
           s = lcg(s);
-          img.data[i]     = (img.data[i]     + (s & 1)) & 0xFF;
-          img.data[i + 1] = (img.data[i + 1] + ((s >> 1) & 1)) & 0xFF;
+          img.data[i]     = (img.data[i]     + (s & 3))        & 0xFF;
+          img.data[i + 1] = (img.data[i + 1] + ((s >> 2) & 3)) & 0xFF;
+          img.data[i + 2] = (img.data[i + 2] + ((s >> 4) & 3)) & 0xFF;
         }
         return img;
       };
@@ -470,6 +482,59 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         return result;
       };
     })();
+
+    // ── 12. UA Client Hints (userAgentData) — Chrome/Android only ─────────
+    (function patchUAClientHints() {
+      if (!nav.userAgent.includes('Chrome')) return;
+      const brands = [
+        { brand: 'Not/A)Brand',   version: '8' },
+        { brand: 'Chromium',      version: '$chromeVersion' },
+        { brand: 'Google Chrome', version: '$chromeVersion' },
+      ];
+      const hi = {
+        brands: brands, mobile: true, platform: 'Android',
+        platformVersion: '$androidVersion', architecture: 'arm', bitness: '64',
+        model: '$androidModel', uaFullVersion: '$chromeVersion.0.0.0',
+        fullVersionList: brands.map(function(b){ return {brand:b.brand, version:'$chromeVersion.0.0.0'}; }),
+      };
+      def(nav, 'userAgentData', {
+        brands: brands, mobile: true, platform: 'Android',
+        toJSON: function(){ return {brands:brands, mobile:true, platform:'Android'}; },
+        getHighEntropyValues: function(){ return Promise.resolve(hi); },
+      });
+    })();
+
+    // ── 13. Block RTCPeerConnection JS-level (IP leak) ─────────────────────
+    try { Object.defineProperty(window,'RTCPeerConnection',       {value:undefined,configurable:true}); } catch(e) {}
+    try { Object.defineProperty(window,'webkitRTCPeerConnection', {value:undefined,configurable:true}); } catch(e) {}
+
+    // ── 14. performance.memory ─────────────────────────────────────────────
+    (function(){
+      if (!window.performance) return;
+      try {
+        Object.defineProperty(window.performance,'memory',{
+          get:function(){ return {
+            usedJSHeapSize:  18000000 + ((SEED*7)%8000000),
+            totalJSHeapSize: 40000000 + ((SEED*3)%12000000),
+            jsHeapSizeLimit: 2197815296,
+          };}, configurable:true
+        });
+      } catch(e) {}
+    })();
+
+    // ── 15. document.visibilityState — always visible ──────────────────────
+    try { Object.defineProperty(document,'visibilityState',{get:()=>'visible',configurable:true}); } catch(e) {}
+    try { Object.defineProperty(document,'hidden',         {get:()=>false,    configurable:true}); } catch(e) {}
+
+    // ── 16. pdfViewerEnabled (Chrome: true, Safari: false) ────────────────
+    def(nav, 'pdfViewerEnabled', ${!isSafari});
+
+    // ── 17. screen.orientation ────────────────────────────────────────────
+    try {
+      Object.defineProperty(screen,'orientation',{
+        get:()=>({type:'portrait-primary',angle:0,onchange:null}), configurable:true
+      });
+    } catch(e) {}
 
   } catch(e) {}
 })();
