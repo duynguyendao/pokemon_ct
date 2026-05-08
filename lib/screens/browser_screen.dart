@@ -68,6 +68,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   int _captchaRetryCount = 0;
   static const int _maxCaptchaRetries = 3;
 
+  // OTP page freeze watchdog (30s sau submit mà trang không chuyển)
+  Timer? _otpFreezeTimer;
+  int _otpFreezeRetryCount = 0;
+  static const int _maxOtpFreezeRetries = 3;
+
   // Overlay for status text (above iOS platform WebView)
   OverlayEntry? _statusOverlay;
 
@@ -308,6 +313,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void dispose() {
     _statusOverlay?.remove();
     _statusOverlay = null;
+    _otpFreezeTimer?.cancel();
     for (final c in _domWaitCompleters.values) {
       if (!c.isCompleted) c.complete();
     }
@@ -349,6 +355,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
               }
             });
             if (wasOnOtpPage && url != _lastOtpPageUrl) {
+              // OTP xác nhận thành công — cancel freeze watchdog
+              _otpFreezeTimer?.cancel();
+              _otpFreezeTimer = null;
+              _otpFreezeRetryCount = 0;
               _setStatus('✅ OTP xác nhận thành công!');
               Future.delayed(const Duration(seconds: 2), () {
                 if (mounted && _statusText.contains('thành công')) {
@@ -485,6 +495,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if (!_otpAutoSubmitting && _lastOtpPageUrl != _currentUrl) {
         _lastOtpPageUrl = _currentUrl;
         _otpRetryCount = 0;
+        _otpFreezeRetryCount = 0; // Reset freeze counter cho trang OTP mới
         _setStatus('📡 Đang lấy OTP...');
         // Clipboard mode: mở app Mail để user thấy email chứa OTP
         if (context.read<AppProvider>().isClipboardOtpMode) {
@@ -497,17 +508,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     // reCAPTCHA / trang bị block → clear cookies + đổi UA + 5G + retry
     if (message.contains('"type":"captchaError"')) {
-      if (!_otpAutoSubmitting &&
-          !_resultChecked &&
-          _captchaRetryCount < _maxCaptchaRetries) {
-        unawaited(_recoverAndRetry());
+      if (!_otpAutoSubmitting && !_resultChecked) {
+        if (_captchaRetryCount < _maxCaptchaRetries) {
+          unawaited(_recoverAndRetry());
+        } else {
+          _setStatus('❌ reCAPTCHA $_maxCaptchaRetries lần liên tiếp — skip account');
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) _skipCurrentAccount();
+          });
+        }
       }
       return;
     }
 
-    // Phát hiện lỗi OTP → retry
+    // Phát hiện lỗi OTP → cancel freeze watchdog + retry
     if (message.contains('"type":"otpError"') &&
         message.contains('"detected":true')) {
+      _otpFreezeTimer?.cancel();
+      _otpFreezeTimer = null;
       if (_otpAutoSubmitting || _lastOtpPageUrl == _currentUrl) {
         _handleOtpError();
       }
@@ -520,26 +538,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
         _setStatus('⌨️ Đã điền OTP...');
       } else if (message.contains('"status":"submitted"')) {
         _setStatus('⏳ Đang xác nhận...');
-        // Sau 3s kiểm tra lại xem có lỗi không hoặc đã chuyển trang
-        Future.delayed(const Duration(seconds: 3), () {
-          if (!mounted) return;
-          if (_currentUrl == _lastOtpPageUrl) {
-            // Vẫn ở trang OTP → check lỗi
-            _controller.runJavaScript(_detectOtpFieldJs);
-            setState(() => _otpAutoSubmitting = false);
-          } else {
-            // Đã chuyển trang → OTP success!
-            setState(() {
-              _otpAutoSubmitting = false;
-              _lastOtpPageUrl = null;
-            });
-            _setStatus('✅ OTP xác nhận thành công!');
-            Future.delayed(const Duration(seconds: 2), () {
-              if (mounted && _statusText.contains('thành công')) {
-                _setStatus('');
-              }
-            });
-          }
+        // Sau 5s kiểm tra lỗi OTP nếu trang chưa chuyển (không reset state)
+        Future.delayed(const Duration(seconds: 5), () {
+          if (!mounted || _currentUrl != _lastOtpPageUrl) return;
+          _controller.runJavaScript(_detectOtpFieldJs);
         });
       } else if (message.contains('"status":"noField"')) {
         setState(() => _otpAutoSubmitting = false);
@@ -741,16 +743,30 @@ class _BrowserScreenState extends State<BrowserScreen> {
       await Clipboard.setData(const ClipboardData(text: ''));
     }
     await _controller.runJavaScript(buildOtpAutoSubmitScript(otp));
+
+    // Watchdog: nếu trang không chuyển sau 30s kể từ khi submit → reload + thử lại
+    _otpFreezeTimer?.cancel();
+    _otpFreezeTimer = Timer(const Duration(seconds: 30), () {
+      if (!mounted) return;
+      if (_currentUrl == _lastOtpPageUrl) {
+        unawaited(_handleOtpFreeze());
+      }
+    });
   }
 
   void _handleOtpError() async {
+    _otpFreezeTimer?.cancel();
+    _otpFreezeTimer = null;
+
     if (_otpRetryCount >= _maxOtpRetries) {
       setState(() => _otpAutoSubmitting = false);
-      _setStatus('❌ Sai OTP $_maxOtpRetries lần, dừng lại');
+      _setStatus('❌ Sai OTP $_maxOtpRetries lần — skip account');
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) _skipCurrentAccount();
       return;
     }
     _otpRetryCount++;
-    _setStatus('Sai OTP, dang cho ma moi... ($_otpRetryCount/$_maxOtpRetries)');
+    _setStatus('⚠️ Sai OTP, chờ mã mới... ($_otpRetryCount/$_maxOtpRetries)');
 
     final newOtp = await _waitForOtpForAccount(
       timeout: const Duration(seconds: 90),
@@ -762,7 +778,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
       return;
     }
     setState(() => _otpAutoSubmitting = false);
-    _setStatus('Khong co OTP moi sau 90s');
+    _setStatus('❌ Không nhận OTP mới sau 90s — skip account');
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) _skipCurrentAccount();
   }
 
   Future<void> _performResultCheck() async {
@@ -867,6 +885,59 @@ class _BrowserScreenState extends State<BrowserScreen> {
     await _controller.loadRequest(Uri.parse(p.loginUrl));
   }
 
+  /// Skip account hiện tại: nếu đang chạy all thì gọi callback, không thì đóng browser
+  void _skipCurrentAccount() {
+    if (widget.isRunningAll && widget.onSkipCurrent != null) {
+      widget.onSkipCurrent!();
+    } else if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  /// OTP page không phản hồi sau 30s: reload + submit lại OTP cuối cùng
+  Future<void> _handleOtpFreeze() async {
+    if (!mounted) return;
+    _otpFreezeTimer?.cancel();
+    _otpFreezeTimer = null;
+
+    if (_otpFreezeRetryCount >= _maxOtpFreezeRetries) {
+      setState(() => _otpAutoSubmitting = false);
+      _setStatus('❌ Trang OTP đơ $_maxOtpFreezeRetries lần — skip account');
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) _skipCurrentAccount();
+      return;
+    }
+
+    _otpFreezeRetryCount++;
+    final otpUrl = _lastOtpPageUrl;
+    final lastOtp = _lastSubmittedOtp;
+
+    if (otpUrl == null || lastOtp == null) {
+      if (mounted) _skipCurrentAccount();
+      return;
+    }
+
+    _setStatus(
+      '🔄 Trang OTP không phản hồi — reload lần $_otpFreezeRetryCount/$_maxOtpFreezeRetries...',
+    );
+    setState(() => _otpAutoSubmitting = false);
+
+    // Reload OTP page — giữ _lastOtpPageUrl == otpUrl để tránh trigger _autoSubmitOtp tự động
+    await _controller.loadRequest(Uri.parse(otpUrl));
+
+    // Chờ OTP input field xuất hiện lại
+    await _waitForElement([
+      'input#authCode',
+      'input[name="dwfrm_factor2Auth_authCode"]',
+      'input[name="passcode"]',
+      'input[maxlength="6"]',
+    ], timeout: 5000);
+
+    if (!mounted) return;
+    // Submit lại mã OTP cuối cùng đã nhận
+    await _doSubmitOtp(lastOtp);
+  }
+
   Future<void> _openMailApp() async {
     try {
       await _utilsChannel.invokeMethod('openMailApp');
@@ -895,6 +966,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
         'input[type="submit"]',
         'a[role="button"]',
       ], timeout: 2000);
+
+      // Copy email vào clipboard trước khi click login
+      // → giúp user biết email nào cần check khi mở app Mail
+      await Clipboard.setData(ClipboardData(text: widget.account.email));
 
       // Ghi lại thời điểm bấm ログイン — chỉ nhận OTP từ sau thời điểm này
       _loginAttemptTime = DateTime.now();
