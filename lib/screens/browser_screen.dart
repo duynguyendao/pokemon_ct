@@ -757,16 +757,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _openMailApp() async {
-    // Thử mở Gmail app trước, fallback về mailto: (mở app mail mặc định)
-    final gmail = Uri.parse('googlegmail://');
-    if (await canLaunchUrl(gmail)) {
-      await launchUrl(gmail, mode: LaunchMode.externalApplication);
-      return;
-    }
-    final mailto = Uri.parse('mailto:');
-    if (await canLaunchUrl(mailto)) {
-      await launchUrl(mailto, mode: LaunchMode.externalApplication);
-    }
+    // Mở app Mail gốc iOS
+    await launchUrl(Uri.parse('mailto:'), mode: LaunchMode.externalApplication);
   }
 
   Future<void> _autoFill({bool silent = false}) async {
