@@ -352,11 +352,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
               await _autoFill(silent: true);
             }
 
-            // Trigger lottery result extraction khi đã login (lotteryResult mode)
+            // Trigger lottery result extraction CHỈ khi đang ở đúng trang result
+            // Không dùng !_isLoginPage vì trang trung gian cũng pass điều kiện đó
+            // → gây loop: performResultCheck navigate lại → redirect về login lại
             if (mounted &&
                 widget.account.mode == AccountMode.lotteryResult &&
                 !_resultChecked &&
-                !_isLoginPage(url)) {
+                p.lotteryResultUrl.isNotEmpty &&
+                url.startsWith(
+                    p.lotteryResultUrl.contains('?')
+                        ? p.lotteryResultUrl.split('?').first
+                        : p.lotteryResultUrl)) {
               _resultChecked = true;
               unawaited(_performResultCheck());
             }
@@ -670,15 +676,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final provider = context.read<AppProvider>();
     final email = widget.account.email;
     final keyword = provider.targetProductName;
-    final resultUrl = provider.lotteryResultUrl;
 
     _setStatus('🏆 Đang lấy kết quả lottery...');
 
-    // Navigate to lottery result URL if not already there
-    if (resultUrl.isNotEmpty && !_currentUrl.contains('lottery-history')) {
-      await _controller.loadRequest(Uri.parse(resultUrl));
-      await Future.delayed(const Duration(seconds: 3));
-    }
+    // Đã ở đúng trang khi trigger — chờ page render xong
+    await Future.delayed(const Duration(milliseconds: 800));
 
     // Wait for result list to appear (or timeout)
     await _waitForElement(['.comOrderList', '.comOrderList > li'], timeout: 5000);
