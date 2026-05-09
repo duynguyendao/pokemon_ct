@@ -18,6 +18,7 @@ class StorageService {
   static const _shortcut5gEnabledKey = 'shortcut5gEnabled';
   static const _otpSourceKey = 'otpSource';
   static const _targetProductNameKey = 'targetProductName';
+  static const _blockImagesKey = 'blockImages';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -162,6 +163,16 @@ class StorageService {
   Future<void> saveTargetProductName(String name) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_targetProductNameKey, name);
+  }
+
+  Future<bool> loadBlockImages() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_blockImagesKey) ?? false;
+  }
+
+  Future<void> saveBlockImages(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_blockImagesKey, v);
   }
 
   List<FilterRule> _defaultRules() => [

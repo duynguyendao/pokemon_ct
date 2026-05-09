@@ -25,6 +25,7 @@ class AppProvider extends ChangeNotifier {
   bool _fakeBrowser = true;
   bool _incognitoMode = false;
   bool _shortcut5gEnabled = true;
+  bool _blockImages = false;
   String _otpSource = 'clipboard'; // 'imap' or 'clipboard'
   String _targetProductName = '';
   final List<LotteryResultEntry> _lotteryResults = [];
@@ -60,6 +61,7 @@ class AppProvider extends ChangeNotifier {
   bool get fakeBrowser => _fakeBrowser;
   bool get incognitoMode => _incognitoMode;
   bool get shortcut5gEnabled => _shortcut5gEnabled;
+  bool get blockImages => _blockImages;
   String get otpSource => _otpSource;
   bool get isClipboardOtpMode => _otpSource == 'clipboard';
   String get targetProductName => _targetProductName;
@@ -100,6 +102,7 @@ class AppProvider extends ChangeNotifier {
     _fakeBrowser = await _storage.loadFakeBrowser();
     _incognitoMode = await _storage.loadIncognitoMode();
     _shortcut5gEnabled = await _storage.loadShortcut5gEnabled();
+    _blockImages = await _storage.loadBlockImages();
     _otpSource = await _storage.loadOtpSource();
     _targetProductName = await _storage.loadTargetProductName();
     _loaded = true;
@@ -258,6 +261,12 @@ class AppProvider extends ChangeNotifier {
   Future<void> setShortcut5gEnabled(bool v) async {
     _shortcut5gEnabled = v;
     await _storage.saveShortcut5gEnabled(v);
+    notifyListeners();
+  }
+
+  Future<void> setBlockImages(bool v) async {
+    _blockImages = v;
+    await _storage.saveBlockImages(v);
     notifyListeners();
   }
 

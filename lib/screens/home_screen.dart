@@ -160,7 +160,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  Future<void> _openAccount(Account account, AppProvider p) async {
+  Future<void> _openAccount(Account account, AppProvider p, {int? index, int? total}) async {
     // Copy email vào clipboard để Shortcut dùng lọc OTP đúng account
     await Clipboard.setData(ClipboardData(text: account.email));
 
@@ -228,6 +228,8 @@ class _HomeScreenState extends State<HomeScreen>
             proxy: proxy,
             startUrl: startUrl,
             isRunningAll: _runningAll,
+            accountIndex: index,
+            totalAccounts: total,
             onStopAll: _runningAll
                 ? () {
                     setState(() => _stopAllRequested = true);
@@ -280,7 +282,7 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() => _runAllIndex = i);
       final startTime = DateTime.now();
       try {
-        await _openAccount(list[i], p);
+        await _openAccount(list[i], p, index: i + 1, total: list.length);
         _currentReport.results.add(
           StartAllResult(
             accountEmail: list[i].email,
@@ -678,6 +680,19 @@ class _HomeScreenState extends State<HomeScreen>
                   'Xóa cookies/cache mỗi lần mở tài khoản',
                   style:
                       TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                activeThumbColor: AppColors.secondary,
+              ),
+              SwitchListTile(
+                value: prov.blockImages,
+                onChanged: prov.setBlockImages,
+                title: const Text(
+                  'Ẩn hình ảnh',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: const Text(
+                  'Tắt ảnh trong webview để tải nhanh hơn',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
                 ),
                 activeThumbColor: AppColors.secondary,
               ),

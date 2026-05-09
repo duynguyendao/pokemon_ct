@@ -18,6 +18,8 @@ class BrowserScreen extends StatefulWidget {
   final Proxy? proxy;
   final String? startUrl;
   final bool isRunningAll;
+  final int? accountIndex;   // 1-based, null khi mở đơn lẻ
+  final int? totalAccounts;
   final VoidCallback? onStopAll;
   final VoidCallback? onSkipCurrent;
 
@@ -27,6 +29,8 @@ class BrowserScreen extends StatefulWidget {
     this.proxy,
     this.startUrl,
     this.isRunningAll = false,
+    this.accountIndex,
+    this.totalAccounts,
     this.onStopAll,
     this.onSkipCurrent,
   });
@@ -58,6 +62,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // Thời điểm bấm ログイン — chỉ lấy OTP gửi SAU thời điểm này
   DateTime? _loginAttemptTime;
+
+  // Đã vượt qua trang OTP ít nhất 1 lần → cho phép captcha recovery sau OTP
+  bool _passedOtpPage = false;
 
   // Lottery result extraction (lotteryResult mode)
   bool _resultChecked = false;
@@ -135,7 +142,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 })();
 ''';
 
-  // Phát hiện reCAPTCHA / trang bị block — KHÔNG chạy trên trang OTP
+  // Phát hiện reCAPTCHA / trang bị block — KHÔNG chạy trên trang OTP hoặc login
   static const String _captchaDetectJs = '''
 (function() {
   // Bỏ qua nếu đang ở trang OTP
@@ -143,13 +150,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
   for (var i = 0; i < otpSels.length; i++) {
     if (document.querySelector(otpSels[i])) return;
   }
-  // reCAPTCHA element visible
+  // reCAPTCHA element visible (check trên mọi trang kể cả login)
   var cap = document.querySelector('.g-recaptcha,[data-sitekey],iframe[src*="recaptcha"],iframe[src*="captcha"]');
   if (cap && cap.offsetParent !== null) {
     window.FlutterChannel.postMessage('{"type":"captchaError","reason":"element"}');
     return;
   }
-  // Error messages đặc trưng của Pokémon Center
+  // Bỏ qua keyword check nếu đang ở trang login (form email hiện diện)
+  // → tránh false positive: lỗi đăng nhập thông thường không phải captcha/block
+  var loginForm = document.querySelector('input[type="email"], input[name="loginEmail"], input[name="email"]');
+  if (loginForm && loginForm.offsetParent !== null) return;
+  // Error messages đặc trưng của Pokémon Center (chỉ check trên trang KHÔNG phải login)
   var kws = [
     'reCAPTCHA 認証失敗','reCAPTCHA認証','認証に失敗',
     'エラーが発生しました','エラー発生しました','システムエラー',
@@ -353,6 +364,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
               if (wasOnOtpPage && url != _lastOtpPageUrl) {
                 _otpAutoSubmitting = false;
                 _lastOtpPageUrl = null;
+                _passedOtpPage = true;
               }
             });
             if (wasOnOtpPage && url != _lastOtpPageUrl) {
@@ -409,6 +421,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
               // Đã ở đúng trang → tiếp tục xuống trigger bên dưới
             }
 
+            // Block images nếu được bật
+            if (p.blockImages && mounted) {
+              unawaited(_controller.runJavaScript('''
+(function(){
+  if(document.getElementById('__bi__'))return;
+  var s=document.createElement('style');
+  s.id='__bi__';
+  s.textContent='img,picture,video{visibility:hidden!important;height:0!important;width:0!important;}[style*="background-image"]{background-image:none!important;}';
+  document.head&&document.head.appendChild(s);
+})();
+'''));
+            }
+
             // Auto-fill email + password trên trang login
             // _loginAttemptTime != null nghĩa là đã click login rồi → không fill lại để tránh loop
             if (_isLoginPage(url) && _lastAutoFillUrl != url && !_autoFilling && _loginAttemptTime == null) {
@@ -419,6 +444,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 'input[name="loginEmail"]',
                 'input[id*="email"]',
               ], timeout: 3000);
+              // Re-check: handler khác có thể đã bắt đầu fill hoặc login đã được click
+              if (!mounted || _autoFilling || _loginAttemptTime != null) return;
               await _autoFill(silent: true);
             }
 
@@ -511,6 +538,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // reCAPTCHA / trang bị block → clear cookies + đổi UA + 5G + retry
     if (message.contains('"type":"captchaError"')) {
       if (!_otpAutoSubmitting && !_resultChecked) {
+        // #6: không recover trong giai đoạn login→OTP (tránh loop)
+        if (_loginAttemptTime != null && !_passedOtpPage) return;
+        // #5: trang lỗi sau OTP (エラーが発生しました) → relogin nhẹ, không clear cookie
+        if (_passedOtpPage) {
+          unawaited(_reloginAfterOtpError());
+          return;
+        }
         if (_captchaRetryCount < _maxCaptchaRetries) {
           unawaited(_recoverAndRetry());
         } else {
@@ -885,6 +919,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _lastOtpPageUrl = null;
       _otpAutoSubmitting = false;
       _loginAttemptTime = null;
+      _passedOtpPage = false;
     });
 
     // 3. Đổi 5G nếu được bật
@@ -900,6 +935,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     // 4. Reload trang login
     _setStatus('🔃 Login lại...');
+    await _controller.loadRequest(Uri.parse(p.loginUrl));
+  }
+
+  /// Relogin nhẹ sau khi trang hậu OTP có エラーが発生しました — không clear cookie / đổi UA
+  Future<void> _reloginAfterOtpError() async {
+    if (!mounted) return;
+    _setStatus('⚠️ Lỗi sau OTP — đăng nhập lại sau 2s...');
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    final p = context.read<AppProvider>();
+    setState(() {
+      _loginAttemptTime = null;
+      _lastAutoFillUrl = null;
+      _lastOtpPageUrl = null;
+      _otpAutoSubmitting = false;
+      _passedOtpPage = false;
+    });
+    _setStatus('🔃 Đăng nhập lại...');
     await _controller.loadRequest(Uri.parse(p.loginUrl));
   }
 
@@ -963,9 +1016,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _autoFill({bool silent = false}) async {
-    // Chỉ reset timestamp khi user bấm tự điền thủ công (không phải auto trigger)
-    // → tránh loop: auto-trigger không được reset timestamp đã set sau khi click login
-    if (!silent) _loginAttemptTime = null;
+    if (!silent) {
+      // Manual trigger: reset để cho phép nhận OTP mới
+      _loginAttemptTime = null;
+    } else {
+      // Auto trigger: set ngay để ngăn onPageFinished gọi lại _autoFill trong khi đang fill
+      _loginAttemptTime = DateTime.now();
+    }
     setState(() => _autoFilling = true);
     _setStatus('📧 Điền email + password...');
     try {
@@ -1098,24 +1155,78 @@ class _BrowserScreenState extends State<BrowserScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              widget.account.email,
-              style: const TextStyle(fontSize: 13, color: Colors.white),
-              overflow: TextOverflow.ellipsis,
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    widget.account.email,
+                    style: const TextStyle(fontSize: 13, color: Colors.white),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (widget.accountIndex != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withAlpha(40),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: AppColors.accent.withAlpha(100)),
+                    ),
+                    child: Text(
+                      '${widget.accountIndex}/${widget.totalAccounts}',
+                      style: const TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
-            Text(
-              _currentUrl.length > 45
-                  ? '${_currentUrl.substring(0, 45)}...'
-                  : _currentUrl,
-              style: const TextStyle(
-                fontSize: 11,
-                color: AppColors.textSecondary,
-              ),
-              overflow: TextOverflow.ellipsis,
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    _currentUrl.length > 32
+                        ? '${_currentUrl.substring(0, 32)}...'
+                        : _currentUrl,
+                    style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _shortUaLabel(_profile.userAgent),
+                  style: const TextStyle(fontSize: 10, color: AppColors.secondary),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
           ],
         ),
         actions: [
+          // Nút shuffle UA (#2)
+          IconButton(
+            icon: const Icon(Icons.shuffle, color: AppColors.secondary, size: 20),
+            tooltip: 'Đổi User Agent ngẫu nhiên',
+            onPressed: () {
+              setState(() {
+                _profile = randomProfile();
+                _lastAutoFillUrl = null;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('UA: ${_profile.name}  •  ${_shortUaLabel(_profile.userAgent)}'),
+                  backgroundColor: AppColors.surfaceVariant,
+                  duration: const Duration(seconds: 2),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              _controller.reload();
+            },
+          ),
           if (widget.isRunningAll) ...[
             if (widget.onSkipCurrent != null)
               Padding(
@@ -1248,6 +1359,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
                         _otpAutoSubmitting = false;
                       });
                       _controller.reload();
+                    },
+                  ),
+                  // Nút relogin thủ công (#7)
+                  IconButton(
+                    icon: const Icon(Icons.login, size: 18, color: AppColors.warning),
+                    tooltip: 'Relogin',
+                    onPressed: () {
+                      setState(() {
+                        _loginAttemptTime = null;
+                        _lastAutoFillUrl = null;
+                        _lastOtpPageUrl = null;
+                        _otpAutoSubmitting = false;
+                        _passedOtpPage = false;
+                      });
+                      _controller.loadRequest(
+                        Uri.parse(context.read<AppProvider>().loginUrl),
+                      );
                     },
                   ),
                   // OTP display — nhấn để fill + submit thủ công
