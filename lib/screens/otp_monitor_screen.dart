@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../models/order_status_entry.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
 import '../services/debug_service.dart';
@@ -58,7 +57,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 3, vsync: this);
     _searchSubjectCtrl.clear();
     _loadConfig();
   }
@@ -274,7 +273,6 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
           tabs: const [
             Tab(text: 'Cài đặt'),
             Tab(text: 'Tìm email'),
-            Tab(text: 'Order'),
             Tab(text: 'Debug'),
           ],
         ),
@@ -284,7 +282,6 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
         children: [
           _buildSettingsTab(p),
           _buildSearchTab(p),
-          _buildOrderStatusTab(p),
           _buildDebugTab(),
         ],
       ),
@@ -815,175 +812,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     );
   }
 
-  // ─── TAB 3: Order Status ──────────────────────────────────────────────────
-
-  Widget _buildOrderStatusTab(AppProvider p) {
-    final results = p.orderStatusResults;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  results.isEmpty
-                      ? 'Chưa có kết quả nào'
-                      : '${results.length} tài khoản',
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-              if (results.isNotEmpty)
-                TextButton.icon(
-                  onPressed: () => p.clearOrderStatusResults(),
-                  icon: const Icon(Icons.delete_outline, size: 16),
-                  label: const Text('Xoá'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.error,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: results.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.inbox_outlined, color: AppColors.textSecondary, size: 48),
-                      SizedBox(height: 12),
-                      Text(
-                        'Chọn mode "Order" và chạy account\nđể kiểm tra tình trạng đơn hàng',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: results.length,
-                  itemBuilder: (_, i) => _buildOrderStatusTile(results[i]),
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOrderStatusTile(OrderStatusEntry entry) {
-    Color statusColor;
-    IconData statusIcon;
-    if (entry.isShipped) {
-      statusColor = AppColors.done;
-      statusIcon = Icons.local_shipping;
-    } else if (entry.isPreparing) {
-      statusColor = AppColors.secondary;
-      statusIcon = Icons.inventory_2_outlined;
-    } else if (entry.isReceived) {
-      statusColor = AppColors.primary;
-      statusIcon = Icons.receipt_long_outlined;
-    } else {
-      statusColor = AppColors.error;
-      statusIcon = Icons.error_outline;
-    }
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      color: AppColors.card,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: statusColor.withAlpha(30),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(statusIcon, color: statusColor, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.accountEmail,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: statusColor.withAlpha(25),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: statusColor.withAlpha(100)),
-                    ),
-                    child: Text(
-                      entry.status,
-                      style: TextStyle(
-                        color: statusColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  if (entry.productTitle.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      entry.productTitle,
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 11,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                  if (entry.orderNum.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      '注文番号: ${entry.orderNum}',
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
-                  if (entry.time.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      entry.time,
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ─── TAB 4: Debug ─────────────────────────────────────────────────────────
+  // ─── TAB 3: Debug ─────────────────────────────────────────────────────────
 
   Widget _buildDebugTab() {
     return ChangeNotifierProvider.value(

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/lottery_result_entry.dart';
+import '../models/order_status_entry.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
 
@@ -21,9 +22,13 @@ class _OtherScreenState extends State<OtherScreen>
   late TextEditingController _productCtrl;
   late TextEditingController _searchCtrl;
 
-  // Table filter / sort state
+  // Lottery result filter / sort state
   String? _filterResult; // null = all, '当選', '落選', 'エラー'
   bool _sortWonFirst = false;
+
+  // Order status filter / search state
+  late TextEditingController _orderSearchCtrl;
+  String? _filterOrderStatus; // null = all
 
   @override
   void initState() {
@@ -33,6 +38,8 @@ class _OtherScreenState extends State<OtherScreen>
     _productCtrl = TextEditingController(text: p.targetProductName);
     _searchCtrl = TextEditingController();
     _searchCtrl.addListener(() => setState(() {}));
+    _orderSearchCtrl = TextEditingController();
+    _orderSearchCtrl.addListener(() => setState(() {}));
   }
 
   @override
@@ -40,6 +47,7 @@ class _OtherScreenState extends State<OtherScreen>
     _tabCtrl.dispose();
     _productCtrl.dispose();
     _searchCtrl.dispose();
+    _orderSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -558,22 +566,411 @@ class _OtherScreenState extends State<OtherScreen>
       );
 
   Widget _buildOrderStatusTab() {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.receipt_long_outlined,
-              size: 56, color: AppColors.textSecondary),
-          SizedBox(height: 12),
-          Text('Order Status',
+    return Consumer<AppProvider>(
+      builder: (context, p, _) {
+        final all = p.orderStatusResults;
+        final rows = _filteredOrders(all);
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildOrderKeywordCard(p),
+              const SizedBox(height: 16),
+              if (all.isNotEmpty) _buildOrderResultsSection(p, all, rows),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  List<OrderStatusEntry> _filteredOrders(List<OrderStatusEntry> all) {
+    return all.where((e) {
+      final q = _orderSearchCtrl.text.trim().toLowerCase();
+      if (q.isNotEmpty && !e.accountEmail.toLowerCase().contains(q)) return false;
+      if (_filterOrderStatus != null && e.status != _filterOrderStatus) return false;
+      return true;
+    }).toList();
+  }
+
+  Widget _buildOrderKeywordCard(AppProvider p) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Từ khóa sản phẩm',
               style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold)),
-          SizedBox(height: 6),
-          Text('Coming soon...',
-              style: TextStyle(color: AppColors.textSecondary)),
-        ],
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Set keyword → đổi mode account sang Order → Start All để check',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _productCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Tên hàng (keyword)',
+                hintText: 'VD: アビスアイ, MEGA拡張',
+                hintStyle: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 12),
+                prefixIcon: const Icon(Icons.search,
+                    color: AppColors.textSecondary, size: 18),
+                suffixIcon: _productCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear,
+                            color: AppColors.textSecondary, size: 16),
+                        onPressed: () => setState(() => _productCtrl.clear()),
+                      )
+                    : null,
+              ),
+              onChanged: (v) {
+                setState(() {});
+                p.setTargetProductName(v.trim());
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Order URL: ${p.orderHistoryUrl}',
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrderResultsSection(
+      AppProvider p, List<OrderStatusEntry> all, List<OrderStatusEntry> rows) {
+    final shippedCount = all.where((e) => e.isShipped).length;
+    final preparingCount = all.where((e) => e.isPreparing).length;
+    final receivedCount = all.where((e) => e.isReceived).length;
+    final errCount = all.where((e) => e.isError).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Summary chips
+        Row(
+          children: [
+            Text(
+              rows.length == all.length
+                  ? '${all.length} kết quả'
+                  : '${rows.length} / ${all.length}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(width: 10),
+            if (shippedCount > 0) ...[
+              _chip('発送済み $shippedCount', AppColors.done),
+              const SizedBox(width: 5),
+            ],
+            if (preparingCount > 0) ...[
+              _chip('準備中 $preparingCount', AppColors.secondary),
+              const SizedBox(width: 5),
+            ],
+            if (receivedCount > 0) ...[
+              _chip('受付 $receivedCount', AppColors.primary),
+              const SizedBox(width: 5),
+            ],
+            if (errCount > 0)
+              _chip('エラー $errCount', AppColors.warning),
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        // Search by email
+        TextField(
+          controller: _orderSearchCtrl,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Tìm theo email...',
+            hintStyle: const TextStyle(
+                color: AppColors.textSecondary, fontSize: 12),
+            prefixIcon: const Icon(Icons.search,
+                color: AppColors.textSecondary, size: 18),
+            suffixIcon: _orderSearchCtrl.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear,
+                        color: AppColors.textSecondary, size: 16),
+                    onPressed: () => _orderSearchCtrl.clear(),
+                  )
+                : null,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Filter chips
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _orderFilterChip('Tất cả', null),
+              const SizedBox(width: 6),
+              _orderFilterChip('注文受付済み', '注文受付済み'),
+              const SizedBox(width: 6),
+              _orderFilterChip('発送準備中', '発送準備中'),
+              const SizedBox(width: 6),
+              _orderFilterChip('発送済み', '発送済み'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // Action buttons
+        Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.copy_all,
+                  color: AppColors.textSecondary, size: 20),
+              tooltip: 'Copy CSV',
+              onPressed: () => _copyOrderCsv(rows),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: AppColors.error, size: 20),
+              tooltip: 'Xóa tất cả',
+              onPressed: () {
+                p.clearOrderStatusResults();
+                setState(() {
+                  _filterOrderStatus = null;
+                  _orderSearchCtrl.clear();
+                });
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+
+        // Table
+        _buildOrderTable(rows),
+      ],
+    );
+  }
+
+  Widget _orderFilterChip(String label, String? value) {
+    final selected = _filterOrderStatus == value;
+    Color color;
+    if (value == '発送済み') {
+      color = AppColors.done;
+    } else if (value == '発送準備中') {
+      color = AppColors.secondary;
+    } else if (value == '注文受付済み') {
+      color = AppColors.primary;
+    } else {
+      color = AppColors.primary;
+    }
+    return GestureDetector(
+      onTap: () => setState(() => _filterOrderStatus = value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected ? color.withAlpha(50) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? color : AppColors.divider,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? color : AppColors.textSecondary,
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _copyOrderCsv(List<OrderStatusEntry> rows) {
+    final lines = ['Email,商品名,注文番号,時間,ステータス'];
+    for (final r in rows) {
+      lines.add([
+        _csvField(r.accountEmail),
+        _csvField(r.productTitle),
+        _csvField(r.orderNum),
+        _csvField(r.time),
+        _csvField(r.status),
+      ].join(','));
+    }
+    Clipboard.setData(ClipboardData(text: lines.join('\r\n')));
+    _snack('Đã copy ${rows.length} dòng CSV');
+  }
+
+  Widget _buildOrderTable(List<OrderStatusEntry> rows) {
+    if (rows.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.divider),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Text(
+          'Không có kết quả',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceVariant,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+          ),
+          child: const Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: Text('Email',
+                    style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text('Hàng',
+                    style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text('Thời gian',
+                    style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ),
+              SizedBox(
+                width: 76,
+                child: Text('Trạng thái',
+                    style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: AppColors.divider),
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+          ),
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: rows.length,
+            separatorBuilder: (_, __) =>
+                const Divider(height: 1, color: AppColors.divider),
+            itemBuilder: (_, i) => _buildOrderRow(rows[i]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOrderRow(OrderStatusEntry e) {
+    Color statusColor;
+    if (e.isShipped) {
+      statusColor = AppColors.done;
+    } else if (e.isPreparing) {
+      statusColor = AppColors.secondary;
+    } else if (e.isReceived) {
+      statusColor = AppColors.primary;
+    } else {
+      statusColor = AppColors.warning;
+    }
+
+    // Rút gọn label cho badge
+    String shortStatus;
+    if (e.status == '注文受付済み') {
+      shortStatus = '受付済み';
+    } else if (e.status == '発送準備中') {
+      shortStatus = '準備中';
+    } else if (e.status == '発送済み') {
+      shortStatus = '発送済み';
+    } else {
+      shortStatus = e.status;
+    }
+
+    return GestureDetector(
+      onLongPress: () {
+        Clipboard.setData(ClipboardData(
+            text: '${e.accountEmail},${e.productTitle},${e.orderNum},${e.time},${e.status}'));
+        _snack('Copied row', duration: const Duration(seconds: 1));
+      },
+      child: Container(
+        color: e.isShipped ? AppColors.done.withAlpha(15) : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Text(e.accountEmail,
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            Expanded(
+              flex: 3,
+              child: Text(e.productTitle.isEmpty ? '—' : e.productTitle,
+                  style: const TextStyle(
+                      color: AppColors.textSecondary, fontSize: 11),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(e.time.isEmpty ? '—' : e.time,
+                  style: const TextStyle(
+                      color: AppColors.textSecondary, fontSize: 10),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            SizedBox(
+              width: 76,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusColor.withAlpha(30),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: statusColor.withAlpha(120)),
+                ),
+                child: Text(
+                  shortStatus,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
