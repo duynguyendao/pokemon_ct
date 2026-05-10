@@ -5,6 +5,7 @@ import '../models/proxy.dart';
 import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
 import '../models/lottery_result_entry.dart';
+import '../models/order_status_entry.dart';
 import '../services/storage_service.dart';
 import '../services/imap_service.dart';
 
@@ -29,6 +30,7 @@ class AppProvider extends ChangeNotifier {
   String _otpSource = 'clipboard'; // 'imap' or 'clipboard'
   String _targetProductName = '';
   final List<LotteryResultEntry> _lotteryResults = [];
+  final List<OrderStatusEntry> _orderStatusResults = [];
   bool _loaded = false;
   bool _imapStarting = false;
   bool _imapStopping = false;
@@ -66,6 +68,7 @@ class AppProvider extends ChangeNotifier {
   bool get isClipboardOtpMode => _otpSource == 'clipboard';
   String get targetProductName => _targetProductName;
   List<LotteryResultEntry> get lotteryResults => List.unmodifiable(_lotteryResults);
+  List<OrderStatusEntry> get orderStatusResults => List.unmodifiable(_orderStatusResults);
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
@@ -290,6 +293,17 @@ class AppProvider extends ChangeNotifier {
 
   void clearLotteryResults() {
     _lotteryResults.clear();
+    notifyListeners();
+  }
+
+  void addOrderStatusResult(OrderStatusEntry entry) {
+    _orderStatusResults.removeWhere((e) => e.accountEmail == entry.accountEmail);
+    _orderStatusResults.add(entry);
+    notifyListeners();
+  }
+
+  void clearOrderStatusResults() {
+    _orderStatusResults.clear();
     notifyListeners();
   }
 

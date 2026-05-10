@@ -1,7 +1,7 @@
 import 'package:uuid/uuid.dart';
 
 /// Chế độ hoạt động khi mở account
-enum AccountMode { loginOnly, lottery, lotteryResult }
+enum AccountMode { loginOnly, lottery, lotteryResult, orderStatus }
 
 extension AccountModeExt on AccountMode {
   String get label {
@@ -9,6 +9,7 @@ extension AccountModeExt on AccountMode {
       case AccountMode.loginOnly: return 'Login';
       case AccountMode.lottery: return 'Lottery';
       case AccountMode.lotteryResult: return 'Result';
+      case AccountMode.orderStatus: return 'Order';
     }
   }
 
@@ -17,6 +18,7 @@ extension AccountModeExt on AccountMode {
       case AccountMode.loginOnly: return 'loginOnly';
       case AccountMode.lottery: return 'lottery';
       case AccountMode.lotteryResult: return 'lotteryResult';
+      case AccountMode.orderStatus: return 'orderStatus';
     }
   }
 
@@ -24,6 +26,7 @@ extension AccountModeExt on AccountMode {
     switch (v) {
       case 'lottery': return AccountMode.lottery;
       case 'lotteryResult': return AccountMode.lotteryResult;
+      case 'orderStatus': return AccountMode.orderStatus;
       default: return AccountMode.loginOnly;
     }
   }

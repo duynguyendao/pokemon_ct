@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/account.dart';
 import '../models/lottery_result_entry.dart';
+import '../models/order_status_entry.dart';
 import '../models/otp_entry.dart';
 import '../models/proxy.dart';
 import '../providers/app_provider.dart';
@@ -70,6 +71,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _resultChecked = false;
   bool _pendingResultNavigation = false;
   Completer<List<dynamic>>? _extractCompleter;
+
+  // Order status extraction (orderStatus mode)
+  bool _orderStatusChecked = false;
+  bool _pendingOrderStatusNavigation = false;
+  Completer<List<dynamic>>? _orderStatusCompleter;
 
   // reCAPTCHA / blocked page recovery
   int _captchaRetryCount = 0;
@@ -142,6 +148,30 @@ class _BrowserScreenState extends State<BrowserScreen> {
 })();
 ''';
 
+  static const String _orderStatusExtractJs = '''
+(function() {
+  var orders = document.querySelectorAll('.comOrderList > li');
+  if (orders.length === 0) {
+    window.FlutterChannel.postMessage(JSON.stringify({type:'orderStatusResult',data:[]}));
+    return;
+  }
+  var result = [];
+  orders.forEach(function(li) {
+    var ttlEl = li.querySelector('.rBox .ttl') || li.querySelector('.ttl');
+    var numEl = li.querySelector('.number span');
+    var timeEl = li.querySelector('p.time');
+    var statusEl = li.querySelector('.txtList li.finish');
+    result.push({
+      title: ttlEl ? ttlEl.textContent.trim() : '',
+      orderNum: numEl ? numEl.textContent.trim() : '',
+      status: statusEl ? statusEl.textContent.trim() : '',
+      time: timeEl ? timeEl.textContent.trim() : ''
+    });
+  });
+  window.FlutterChannel.postMessage(JSON.stringify({type:'orderStatusResult',data:result}));
+})();
+''';
+
   // Phát hiện reCAPTCHA / trang bị block — KHÔNG chạy trên trang OTP hoặc login
   static const String _captchaDetectJs = '''
 (function() {
@@ -162,10 +192,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   if (loginForm && loginForm.offsetParent !== null) return;
   // Error messages đặc trưng của Pokémon Center (chỉ check trên trang KHÔNG phải login)
   var kws = [
-    'reCAPTCHA 認証失敗','reCAPTCHA認証','認証に失敗',
+    'reCAPTCHA 認証失敗','reCAPTCHA認証','認証に失敗','認証失敗しました',
     'エラーが発生しました','エラー発生しました','システムエラー',
     'アクセスが一時的に制限','ロボットではありません',
     'ただいまメンテナンス','しばらくしてから',
+    'しばらく時間','お時間をおいて','ご不便をおかけ',
   ];
   var text = document.body ? document.body.innerText : '';
   for (var j = 0; j < kws.length; j++) {
@@ -383,6 +414,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   !_resultChecked) {
                 setState(() => _pendingResultNavigation = true);
               }
+              // orderStatus mode: sau OTP thành công → navigate về trang order history
+              if (widget.account.mode == AccountMode.orderStatus &&
+                  !_orderStatusChecked) {
+                setState(() => _pendingOrderStatusNavigation = true);
+              }
             }
             if (p.fakeBrowser) {
               _controller.runJavaScript(buildAntiFingerprintScript(_profile));
@@ -419,6 +455,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 return;
               }
               // Đã ở đúng trang → tiếp tục xuống trigger bên dưới
+            }
+
+            // Sau OTP thành công trong orderStatus mode → điều hướng đến trang order history
+            if (_pendingOrderStatusNavigation &&
+                !_orderStatusChecked &&
+                p.orderHistoryUrl.isNotEmpty) {
+              setState(() => _pendingOrderStatusNavigation = false);
+              final base = p.orderHistoryUrl.contains('?')
+                  ? p.orderHistoryUrl.split('?').first
+                  : p.orderHistoryUrl;
+              if (!url.startsWith(base)) {
+                unawaited(
+                  _controller.loadRequest(Uri.parse(p.orderHistoryUrl)),
+                );
+                return;
+              }
             }
 
             // Block images nếu được bật
@@ -462,6 +514,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
                         : p.lotteryResultUrl)) {
               _resultChecked = true;
               unawaited(_performResultCheck());
+            }
+
+            // Trigger order status extraction khi đang ở trang order history
+            if (mounted &&
+                widget.account.mode == AccountMode.orderStatus &&
+                !_orderStatusChecked &&
+                p.orderHistoryUrl.isNotEmpty &&
+                url.startsWith(
+                    p.orderHistoryUrl.contains('?')
+                        ? p.orderHistoryUrl.split('?').first
+                        : p.orderHistoryUrl)) {
+              _orderStatusChecked = true;
+              unawaited(_performOrderStatusCheck());
             }
 
             // Dùng JS để phát hiện field OTP — không có 'body' fallback
@@ -515,6 +580,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
       return;
     }
 
+    // Order status extraction response
+    if (message.contains('"type":"orderStatusResult"')) {
+      try {
+        final data = jsonDecode(message) as Map<String, dynamic>;
+        final items = (data['data'] as List?) ?? [];
+        if (_orderStatusCompleter?.isCompleted == false) {
+          _orderStatusCompleter!.complete(items);
+        }
+      } catch (_) {}
+      return;
+    }
+
     // OTP field phát hiện → auto submit
     if (message.contains('"type":"otpField"') &&
         message.contains('"detected":true')) {
@@ -537,7 +614,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     // reCAPTCHA / trang bị block → clear cookies + đổi UA + 5G + retry
     if (message.contains('"type":"captchaError"')) {
-      if (!_otpAutoSubmitting && !_resultChecked) {
+      if (!_otpAutoSubmitting && !_resultChecked && !_orderStatusChecked) {
         // #6: không recover trong giai đoạn login→OTP (tránh loop)
         if (_loginAttemptTime != null && !_passedOtpPage) return;
         // #5: trang lỗi sau OTP (エラーが発生しました) → relogin nhẹ, không clear cookie
@@ -897,6 +974,70 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  Future<void> _performOrderStatusCheck() async {
+    if (!mounted) return;
+    final provider = context.read<AppProvider>();
+    final email = widget.account.email;
+    final keyword = provider.targetProductName;
+
+    _setStatus('📦 Đang kiểm tra tình trạng order...');
+
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    await _waitForElement(['.comOrderList', '.comOrderList > li'], timeout: 5000);
+
+    _orderStatusCompleter = Completer<List<dynamic>>();
+    await _controller.runJavaScript(_orderStatusExtractJs);
+
+    List<dynamic> items;
+    try {
+      items = await _orderStatusCompleter!.future.timeout(const Duration(seconds: 10));
+    } catch (_) {
+      _setStatus('❌ Không lấy được tình trạng order');
+      await Future.delayed(const Duration(seconds: 3));
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+
+    if (items.isEmpty) {
+      provider.addOrderStatusResult(OrderStatusEntry(
+        accountEmail: email, productTitle: keyword,
+        orderNum: '', status: '対象なし', time: ''));
+      _setStatus('⚠️ Không có order nào trong lịch sử');
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+
+    final kw = keyword.toLowerCase();
+    for (final item in items) {
+      final title = ((item['title'] as String?) ?? '').toLowerCase();
+      if (kw.isEmpty || title.contains(kw)) {
+        final status = item['status'] as String? ?? '';
+        final entry = OrderStatusEntry(
+          accountEmail: email,
+          productTitle: item['title'] as String? ?? '',
+          orderNum: item['orderNum'] as String? ?? '',
+          status: status.isNotEmpty ? status : 'エラー',
+          time: item['time'] as String? ?? '',
+        );
+        provider.addOrderStatusResult(entry);
+        final icon = entry.isShipped ? '🚚' : entry.isPreparing ? '📦' : '📋';
+        _setStatus('$icon ${entry.status} — ${entry.productTitle}');
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
+    }
+
+    provider.addOrderStatusResult(OrderStatusEntry(
+      accountEmail: email, productTitle: keyword,
+      orderNum: '', status: '対象なし', time: ''));
+    _setStatus('対象なし — không tìm thấy order "$keyword"');
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) Navigator.of(context).pop();
+  }
+
   /// reCAPTCHA / block detected: clear cookies → đổi profile → 5G → retry login
   Future<void> _recoverAndRetry() async {
     if (!mounted) return;
@@ -905,12 +1046,20 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final p = context.read<AppProvider>();
     _setStatus('🛡️ reCAPTCHA detected — reset lần $_captchaRetryCount/$_maxCaptchaRetries...');
 
-    // 1. Xóa cookies + storage, reset fingerprint patch flag
+    // 1. Xóa cookies + toàn bộ storage (localStorage, sessionStorage, IndexedDB)
     await WebViewCookieManager().clearCookies();
-    await _controller.runJavaScript(
-      'try{localStorage.clear();sessionStorage.clear();}catch(e){};'
-      'window.__fpPatched=false;',
-    );
+    await _controller.runJavaScript('''
+try{localStorage.clear();}catch(e){}
+try{sessionStorage.clear();}catch(e){}
+try{
+  if(indexedDB && indexedDB.databases){
+    indexedDB.databases().then(function(dbs){
+      dbs.forEach(function(db){try{indexedDB.deleteDatabase(db.name);}catch(e){}});
+    });
+  }
+}catch(e){}
+window.__fpPatched=false;
+''');
 
     // 2. Đổi sang device profile mới (UA được re-inject qua buildAntiFingerprintScript khi load trang)
     setState(() {
@@ -933,7 +1082,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     if (!mounted) return;
 
-    // 4. Reload trang login
+    // 4. Random delay thêm 1-4s để tránh pattern bot (giả lập hành vi người dùng)
+    final extraMs = 1000 + (DateTime.now().millisecond % 3000);
+    await Future.delayed(Duration(milliseconds: extraMs));
+    if (!mounted) return;
+
+    // 5. Reload trang login
     _setStatus('🔃 Login lại...');
     await _controller.loadRequest(Uri.parse(p.loginUrl));
   }

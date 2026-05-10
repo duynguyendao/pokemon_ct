@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../models/filter_rule.dart';
-import '../models/otp_entry.dart';
+import '../models/order_status_entry.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
 import '../services/debug_service.dart';
@@ -50,7 +49,6 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
   String? _searchError;
 
   bool _testing = false;
-  bool _fetching = false;
   String? _testError;
   bool _testSuccess = false;
 
@@ -161,23 +159,6 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     }
   }
 
-  Future<void> _fetchNow(AppProvider p) async {
-    setState(() => _fetching = true);
-    final results = await p.fetchOtpNow();
-    setState(() => _fetching = false);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            results.isEmpty
-                ? 'Không tìm thấy OTP mới'
-                : '✅ Tìm thấy ${results.length} OTP',
-          ),
-        ),
-      );
-    }
-  }
-
   Future<void> _searchEmails(AppProvider p) async {
     await _saveConfig(p);
     setState(() {
@@ -253,140 +234,6 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     });
   }
 
-  // ─── RULE DIALOG ──────────────────────────────────────────────────────────
-
-  void _showRuleDialog(AppProvider p, {FilterRule? existing}) {
-    FilterType type = existing?.type ?? FilterType.sender;
-    final patternCtrl = TextEditingController(text: existing?.pattern ?? '');
-    final extractCtrl = TextEditingController(
-      text: existing?.extractPattern ?? r'【パスコード】\s*(\d{6})',
-    );
-
-    showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          backgroundColor: AppColors.card,
-          title: Text(
-            existing == null ? 'Thêm quy tắc lọc' : 'Sửa quy tắc lọc',
-            style: const TextStyle(color: Colors.white),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<FilterType>(
-                  value: type,
-                  dropdownColor: AppColors.surfaceVariant,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(labelText: 'Loại'),
-                  items: FilterType.values
-                      .map(
-                        (t) => DropdownMenuItem(
-                          value: t,
-                          child: Text(
-                            const {
-                              FilterType.sender: 'Người gửi',
-                              FilterType.subject: 'Tiêu đề',
-                              FilterType.recipient: 'Người nhận',
-                              FilterType.body: 'Nội dung email',
-                              FilterType.regex: 'Regex',
-                            }[t]!,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setS(() => type = v!),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: patternCtrl,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Pattern',
-                    hintText:
-                        {
-                          FilterType.sender: 'pokemoncenter-online.com',
-                          FilterType.subject: 'ログイン用パスコード',
-                          FilterType.recipient: 'abc@gmail.com',
-                          FilterType.body: 'パスコード',
-                          FilterType.regex: r'\b(\d{6})\b',
-                        }[type] ??
-                        'pokemoncenter-online.com',
-                    helperText:
-                        'Chuỗi cần khớp (người gửi / tiêu đề / người nhận / nội dung / regex)',
-                    helperStyle: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: extractCtrl,
-                  style: const TextStyle(color: Colors.white),
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                    labelText: 'Regex trích xuất OTP',
-                    helperMaxLines: 2,
-                    helperText:
-                        r'Nhóm (\d{6}) là OTP. Ví dụ: 【パスコード】\s*(\d{6})',
-                    helperStyle: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 11,
-                    ),
-                    suffixIcon: IconButton(
-                      icon: const Icon(
-                        Icons.restore,
-                        color: AppColors.textSecondary,
-                        size: 18,
-                      ),
-                      tooltip: 'Mặc định',
-                      onPressed: () => extractCtrl.text = r'【パスコード】\s*(\d{6})',
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Hủy'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (patternCtrl.text.trim().isEmpty) return;
-                final rules = List<FilterRule>.from(p.filterRules);
-                if (existing == null) {
-                  rules.add(
-                    FilterRule(
-                      type: type,
-                      pattern: patternCtrl.text.trim(),
-                      extractPattern: extractCtrl.text.trim(),
-                    ),
-                  );
-                } else {
-                  final idx = rules.indexWhere((r) => r.id == existing.id);
-                  if (idx >= 0) {
-                    rules[idx] = existing.copyWith(
-                      type: type,
-                      pattern: patternCtrl.text.trim(),
-                      extractPattern: extractCtrl.text.trim(),
-                    );
-                  }
-                }
-                p.saveFilterRules(rules);
-                Navigator.pop(context);
-              },
-              child: Text(existing == null ? 'Thêm' : 'Lưu'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ─── BUILD ────────────────────────────────────────────────────────────────
 
   @override
@@ -427,7 +274,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
           tabs: const [
             Tab(text: 'Cài đặt'),
             Tab(text: 'Tìm email'),
-            Tab(text: 'OTP'),
+            Tab(text: 'Order'),
             Tab(text: 'Debug'),
           ],
         ),
@@ -437,7 +284,7 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
         children: [
           _buildSettingsTab(p),
           _buildSearchTab(p),
-          _buildOtpTab(p),
+          _buildOrderStatusTab(p),
           _buildDebugTab(),
         ],
       ),
@@ -663,56 +510,6 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
 
           const SizedBox(height: 16),
 
-          // Filter Rules
-          Row(
-            children: [
-              const Text(
-                'Quy tắc lọc OTP',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => _showRuleDialog(p),
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Thêm'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.card,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.divider),
-            ),
-            child: const Text(
-              '💡 Nếu không có quy tắc khớp, app sẽ tự tìm 6 số bất kỳ trong email.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-            ),
-          ),
-          ...p.filterRules.map((rule) => _buildRuleTile(rule, p)),
-          if (p.filterRules.isEmpty)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Chưa có quy tắc nào. Dùng fallback 6-digit.',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ),
-
-          const SizedBox(height: 16),
-
           // URL Settings
           _sectionCard(
             title: '🔗 Cài đặt đường dẫn',
@@ -796,81 +593,6 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildRuleTile(FilterRule rule, AppProvider p) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          decoration: BoxDecoration(
-            color: AppColors.secondary.withAlpha(50),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Text(
-            rule.typeLabel,
-            style: const TextStyle(
-              color: AppColors.secondary,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        title: Text(
-          rule.pattern,
-          style: TextStyle(
-            color: rule.enabled ? Colors.white : AppColors.textSecondary,
-            fontSize: 14,
-            decoration: rule.enabled ? null : TextDecoration.lineThrough,
-          ),
-        ),
-        subtitle: rule.extractPattern?.isNotEmpty == true
-            ? Text(
-                'Extract: ${rule.extractPattern}',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 11,
-                ),
-              )
-            : null,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Switch(
-              value: rule.enabled,
-              activeThumbColor: AppColors.done,
-              onChanged: (v) {
-                final rules = List<FilterRule>.from(p.filterRules);
-                final idx = rules.indexWhere((r) => r.id == rule.id);
-                if (idx >= 0) rules[idx] = rule.copyWith(enabled: v);
-                p.saveFilterRules(rules);
-              },
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.edit_outlined,
-                color: AppColors.secondary,
-                size: 20,
-              ),
-              onPressed: () => _showRuleDialog(p, existing: rule),
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.delete_outline,
-                color: AppColors.error,
-                size: 20,
-              ),
-              onPressed: () {
-                final rules = List<FilterRule>.from(p.filterRules)
-                  ..removeWhere((r) => r.id == rule.id);
-                p.saveFilterRules(rules);
-              },
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1093,196 +815,169 @@ class _OtpMonitorScreenState extends State<OtpMonitorScreen>
     );
   }
 
-  // ─── TAB 3: OTP History ───────────────────────────────────────────────────
+  // ─── TAB 3: Order Status ──────────────────────────────────────────────────
 
-  Widget _buildOtpTab(AppProvider p) {
+  Widget _buildOrderStatusTab(AppProvider p) {
+    final results = p.orderStatusResults;
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Row(
             children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: p.imapRunning
-                      ? AppColors.done
-                      : AppColors.textSecondary,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  p.imapRunning
-                      ? 'Đang theo dõi · ${p.otpHistory.length} OTPs'
-                      : 'Chưa kết nối',
-                  style: TextStyle(
-                    color: p.imapRunning
-                        ? AppColors.done
-                        : AppColors.textSecondary,
+                  results.isEmpty
+                      ? 'Chưa có kết quả nào'
+                      : '${results.length} tài khoản',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
                     fontSize: 13,
                   ),
                 ),
               ),
-              ElevatedButton.icon(
-                onPressed: _fetching ? null : () => _fetchNow(p),
-                icon: _fetching
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.refresh, size: 16),
-                label: Text(_fetching ? '...' : 'Lấy ngay'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.card,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+              if (results.isNotEmpty)
+                TextButton.icon(
+                  onPressed: () => p.clearOrderStatusResults(),
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: const Text('Xoá'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                   ),
-                  minimumSize: Size.zero,
                 ),
-              ),
-              if (p.otpHistory.isNotEmpty) ...[
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(
-                    Icons.clear_all,
-                    color: AppColors.textSecondary,
-                    size: 20,
-                  ),
-                  tooltip: 'Xóa lịch sử',
-                  onPressed: () => p.clearOtpHistory(),
-                ),
-              ],
             ],
           ),
         ),
         const Divider(height: 1),
         Expanded(
-          child: p.otpHistory.isEmpty
+          child: results.isEmpty
               ? const Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.sms_outlined,
-                        color: AppColors.textSecondary,
-                        size: 48,
-                      ),
-                      SizedBox(height: 8),
+                      Icon(Icons.inbox_outlined, color: AppColors.textSecondary, size: 48),
+                      SizedBox(height: 12),
                       Text(
-                        'Chưa có OTP nào',
-                        style: TextStyle(color: AppColors.textSecondary),
+                        'Chọn mode "Order" và chạy account\nđể kiểm tra tình trạng đơn hàng',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
                       ),
                     ],
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.all(8),
-                  itemCount: p.otpHistory.length,
-                  itemBuilder: (_, i) => _buildOtpTile(p.otpHistory[i]),
+                  padding: const EdgeInsets.all(12),
+                  itemCount: results.length,
+                  itemBuilder: (_, i) => _buildOrderStatusTile(results[i]),
                 ),
         ),
       ],
     );
   }
 
-  Widget _buildOtpTile(OtpEntry otp) {
+  Widget _buildOrderStatusTile(OrderStatusEntry entry) {
+    Color statusColor;
+    IconData statusIcon;
+    if (entry.isShipped) {
+      statusColor = AppColors.done;
+      statusIcon = Icons.local_shipping;
+    } else if (entry.isPreparing) {
+      statusColor = AppColors.secondary;
+      statusIcon = Icons.inventory_2_outlined;
+    } else if (entry.isReceived) {
+      statusColor = AppColors.primary;
+      statusIcon = Icons.receipt_long_outlined;
+    } else {
+      statusColor = AppColors.error;
+      statusIcon = Icons.error_outline;
+    }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: otp.isRecent ? AppColors.done.withAlpha(30) : AppColors.card,
-            borderRadius: BorderRadius.circular(8),
-            border: otp.isRecent ? Border.all(color: AppColors.done) : null,
-          ),
-          child: Icon(
-            Icons.sms,
-            color: otp.isRecent ? AppColors.done : AppColors.textSecondary,
-            size: 22,
-          ),
-        ),
-        title: Row(
-          children: [
-            Text(
-              otp.code,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
-                letterSpacing: 3,
-              ),
-            ),
-            if (otp.isRecent) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.done,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  'MỚI',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-        subtitle: Column(
+      color: AppColors.card,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (otp.recipient != null)
-              Text(
-                'To: ${otp.recipient!}',
-                style: const TextStyle(
-                  color: AppColors.primary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: statusColor.withAlpha(30),
+                borderRadius: BorderRadius.circular(8),
               ),
-            if (otp.sender != null)
-              Text(
-                otp.sender!,
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 11,
-                ),
-              ),
-            Text(
-              _timeFmt.format(otp.timestamp),
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 11,
+              child: Icon(statusIcon, color: statusColor, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.accountEmail,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: statusColor.withAlpha(25),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: statusColor.withAlpha(100)),
+                    ),
+                    child: Text(
+                      entry.status,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  if (entry.productTitle.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      entry.productTitle,
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (entry.orderNum.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '注文番号: ${entry.orderNum}',
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                  if (entry.time.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      entry.time,
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
-        ),
-        trailing: IconButton(
-          icon: const Icon(
-            Icons.copy,
-            color: AppColors.textSecondary,
-            size: 20,
-          ),
-          onPressed: () {
-            Clipboard.setData(ClipboardData(text: otp.code));
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Đã copy OTP!'),
-                duration: Duration(seconds: 1),
-              ),
-            );
-          },
         ),
       ),
     );
