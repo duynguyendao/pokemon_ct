@@ -33,6 +33,7 @@ class AccountCard extends StatelessWidget {
     AccountMode.loginOnly: AppColors.primary,
     AccountMode.lottery: AppColors.accent,
     AccountMode.lotteryResult: AppColors.done,
+    AccountMode.orderStatus: AppColors.secondary,
   };
 
   @override

@@ -160,11 +160,28 @@ class _BrowserScreenState extends State<BrowserScreen> {
     var ttlEl = li.querySelector('.rBox .ttl') || li.querySelector('.ttl');
     var numEl = li.querySelector('.number span');
     var timeEl = li.querySelector('p.time');
+
+    // Detect status: ưu tiên li.finish trong txtList
     var statusEl = li.querySelector('.txtList li.finish');
+    var status = statusEl ? statusEl.textContent.trim() : '';
+
+    // Nếu không tìm thấy li.finish, kiểm tra キャンセル済み trong vùng subBox/receiptBox
+    if (!status) {
+      var subBox = li.querySelector('.subBox') || li;
+      var subText = subBox.textContent || '';
+      if (subText.indexOf('キャンセル済み') >= 0) status = 'キャンセル済み';
+    }
+
+    // Nếu comReceiptBox có class cancel → キャンセル済み
+    var receiptBox = li.querySelector('.comReceiptBox');
+    if (receiptBox && (receiptBox.classList.contains('cancel') || receiptBox.classList.contains('cancelled'))) {
+      status = 'キャンセル済み';
+    }
+
     result.push({
       title: ttlEl ? ttlEl.textContent.trim() : '',
       orderNum: numEl ? numEl.textContent.trim() : '',
-      status: statusEl ? statusEl.textContent.trim() : '',
+      status: status,
       time: timeEl ? timeEl.textContent.trim() : ''
     });
   });
@@ -615,9 +632,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // reCAPTCHA / trang bị block → clear cookies + đổi UA + 5G + retry
     if (message.contains('"type":"captchaError"')) {
       if (!_otpAutoSubmitting && !_resultChecked && !_orderStatusChecked) {
-        // #6: không recover trong giai đoạn login→OTP (tránh loop)
-        if (_loginAttemptTime != null && !_passedOtpPage) return;
-        // #5: trang lỗi sau OTP (エラーが発生しました) → relogin nhẹ, không clear cookie
+        // Trang lỗi sau OTP → relogin nhẹ, không clear cookie
         if (_passedOtpPage) {
           unawaited(_reloginAfterOtpError());
           return;
@@ -1045,6 +1060,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // Capture context-dependent values trước await
     final p = context.read<AppProvider>();
     _setStatus('🛡️ reCAPTCHA detected — reset lần $_captchaRetryCount/$_maxCaptchaRetries...');
+
+    // Chờ 2s để trang hiển thị lỗi xong trước khi reset
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
 
     // 1. Xóa cookies + toàn bộ storage (localStorage, sessionStorage, IndexedDB)
     await WebViewCookieManager().clearCookies();

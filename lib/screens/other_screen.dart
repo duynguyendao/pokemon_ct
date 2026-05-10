@@ -655,6 +655,7 @@ class _OtherScreenState extends State<OtherScreen>
     final shippedCount = all.where((e) => e.isShipped).length;
     final preparingCount = all.where((e) => e.isPreparing).length;
     final receivedCount = all.where((e) => e.isReceived).length;
+    final cancelledCount = all.where((e) => e.isCancelled).length;
     final errCount = all.where((e) => e.isError).length;
 
     return Column(
@@ -684,6 +685,10 @@ class _OtherScreenState extends State<OtherScreen>
             ],
             if (receivedCount > 0) ...[
               _chip('受付 $receivedCount', AppColors.primary),
+              const SizedBox(width: 5),
+            ],
+            if (cancelledCount > 0) ...[
+              _chip('キャンセル $cancelledCount', Colors.grey),
               const SizedBox(width: 5),
             ],
             if (errCount > 0)
@@ -727,6 +732,8 @@ class _OtherScreenState extends State<OtherScreen>
               _orderFilterChip('発送準備中', '発送準備中'),
               const SizedBox(width: 6),
               _orderFilterChip('発送済み', '発送済み'),
+              const SizedBox(width: 6),
+              _orderFilterChip('キャンセル済み', 'キャンセル済み'),
             ],
           ),
         ),
@@ -772,6 +779,8 @@ class _OtherScreenState extends State<OtherScreen>
       color = AppColors.secondary;
     } else if (value == '注文受付済み') {
       color = AppColors.primary;
+    } else if (value == 'キャンセル済み') {
+      color = Colors.grey;
     } else {
       color = AppColors.primary;
     }
@@ -902,6 +911,8 @@ class _OtherScreenState extends State<OtherScreen>
       statusColor = AppColors.secondary;
     } else if (e.isReceived) {
       statusColor = AppColors.primary;
+    } else if (e.isCancelled) {
+      statusColor = Colors.grey;
     } else {
       statusColor = AppColors.warning;
     }
@@ -914,6 +925,8 @@ class _OtherScreenState extends State<OtherScreen>
       shortStatus = '準備中';
     } else if (e.status == '発送済み') {
       shortStatus = '発送済み';
+    } else if (e.status == 'キャンセル済み') {
+      shortStatus = 'キャンセル';
     } else {
       shortStatus = e.status;
     }

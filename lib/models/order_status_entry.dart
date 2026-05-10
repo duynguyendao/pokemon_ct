@@ -16,5 +16,6 @@ class OrderStatusEntry {
   bool get isReceived => status == '注文受付済み';
   bool get isPreparing => status == '発送準備中';
   bool get isShipped => status == '発送済み';
+  bool get isCancelled => status == 'キャンセル済み';
   bool get isError => status == 'エラー' || status == '対象なし';
 }
