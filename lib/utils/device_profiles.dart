@@ -40,8 +40,30 @@ class DeviceProfile {
   });
 }
 
-// Updated UA strings - Chrome 136, iOS 18.x (as of mid-2025)
+// Chỉ dùng Safari iOS profiles vì WKWebView KHÔNG thể giả lập
+// Sec-CH-UA / Sec-CH-UA-Mobile / Sec-CH-UA-Platform headers (Chrome/Android cần
+// các header này → server detect bot ngay nếu UA là Chrome nhưng thiếu headers).
 const List<DeviceProfile> kDeviceProfiles = [
+  DeviceProfile(
+    name: 'iPhone 16 Pro Max',
+    userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone',
+    vendor: 'Apple Computer, Inc.',
+    languages: ['ja-JP', 'ja', 'en-US'],
+    hardwareConcurrency: 6,
+    deviceMemory: 8,
+    screenWidth: 440,
+    screenHeight: 956,
+    devicePixelRatio: 3.0,
+    maxTouchPoints: 5,
+    webglVendor: 'Apple Inc.',
+    webglRenderer: 'Apple GPU',
+    timezone: 'Asia/Tokyo',
+    timezoneOffset: -540,
+    colorGamut: 'p3',
+    audioSampleRate: 44100,
+  ),
   DeviceProfile(
     name: 'iPhone 16 Pro',
     userAgent:
@@ -53,6 +75,46 @@ const List<DeviceProfile> kDeviceProfiles = [
     deviceMemory: 8,
     screenWidth: 402,
     screenHeight: 874,
+    devicePixelRatio: 3.0,
+    maxTouchPoints: 5,
+    webglVendor: 'Apple Inc.',
+    webglRenderer: 'Apple GPU',
+    timezone: 'Asia/Tokyo',
+    timezoneOffset: -540,
+    colorGamut: 'p3',
+    audioSampleRate: 44100,
+  ),
+  DeviceProfile(
+    name: 'iPhone 16',
+    userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone',
+    vendor: 'Apple Computer, Inc.',
+    languages: ['ja-JP', 'ja', 'en-US'],
+    hardwareConcurrency: 6,
+    deviceMemory: 8,
+    screenWidth: 393,
+    screenHeight: 852,
+    devicePixelRatio: 3.0,
+    maxTouchPoints: 5,
+    webglVendor: 'Apple Inc.',
+    webglRenderer: 'Apple GPU',
+    timezone: 'Asia/Tokyo',
+    timezoneOffset: -540,
+    colorGamut: 'p3',
+    audioSampleRate: 44100,
+  ),
+  DeviceProfile(
+    name: 'iPhone 15 Pro Max',
+    userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone',
+    vendor: 'Apple Computer, Inc.',
+    languages: ['ja-JP', 'ja', 'en-US'],
+    hardwareConcurrency: 6,
+    deviceMemory: 8,
+    screenWidth: 430,
+    screenHeight: 932,
     devicePixelRatio: 3.0,
     maxTouchPoints: 5,
     webglVendor: 'Apple Inc.',
@@ -83,6 +145,26 @@ const List<DeviceProfile> kDeviceProfiles = [
     audioSampleRate: 44100,
   ),
   DeviceProfile(
+    name: 'iPhone 15 Plus',
+    userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone',
+    vendor: 'Apple Computer, Inc.',
+    languages: ['ja-JP', 'ja', 'en-US'],
+    hardwareConcurrency: 6,
+    deviceMemory: 6,
+    screenWidth: 430,
+    screenHeight: 932,
+    devicePixelRatio: 3.0,
+    maxTouchPoints: 5,
+    webglVendor: 'Apple Inc.',
+    webglRenderer: 'Apple GPU',
+    timezone: 'Asia/Tokyo',
+    timezoneOffset: -540,
+    colorGamut: 'p3',
+    audioSampleRate: 44100,
+  ),
+  DeviceProfile(
     name: 'iPhone 15',
     userAgent:
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.7 Mobile/15E148 Safari/604.1',
@@ -93,6 +175,26 @@ const List<DeviceProfile> kDeviceProfiles = [
     deviceMemory: 6,
     screenWidth: 393,
     screenHeight: 852,
+    devicePixelRatio: 3.0,
+    maxTouchPoints: 5,
+    webglVendor: 'Apple Inc.',
+    webglRenderer: 'Apple GPU',
+    timezone: 'Asia/Tokyo',
+    timezoneOffset: -540,
+    colorGamut: 'p3',
+    audioSampleRate: 44100,
+  ),
+  DeviceProfile(
+    name: 'iPhone 14 Pro Max',
+    userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6.1 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone',
+    vendor: 'Apple Computer, Inc.',
+    languages: ['ja-JP', 'ja', 'en-US'],
+    hardwareConcurrency: 6,
+    deviceMemory: 6,
+    screenWidth: 430,
+    screenHeight: 932,
     devicePixelRatio: 3.0,
     maxTouchPoints: 5,
     webglVendor: 'Apple Inc.',
@@ -143,6 +245,26 @@ const List<DeviceProfile> kDeviceProfiles = [
     audioSampleRate: 44100,
   ),
   DeviceProfile(
+    name: 'iPhone 13 Pro',
+    userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+    platform: 'iPhone',
+    vendor: 'Apple Computer, Inc.',
+    languages: ['ja-JP', 'ja', 'en-US'],
+    hardwareConcurrency: 6,
+    deviceMemory: 6,
+    screenWidth: 390,
+    screenHeight: 844,
+    devicePixelRatio: 3.0,
+    maxTouchPoints: 5,
+    webglVendor: 'Apple Inc.',
+    webglRenderer: 'Apple GPU',
+    timezone: 'Asia/Tokyo',
+    timezoneOffset: -540,
+    colorGamut: 'p3',
+    audioSampleRate: 44100,
+  ),
+  DeviceProfile(
     name: 'iPhone 13',
     userAgent:
         'Mozilla/5.0 (iPhone; CPU iPhone OS 16_7_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
@@ -162,92 +284,17 @@ const List<DeviceProfile> kDeviceProfiles = [
     colorGamut: 'p3',
     audioSampleRate: 44100,
   ),
-  DeviceProfile(
-    name: 'Samsung Galaxy S25',
-    userAgent:
-        'Mozilla/5.0 (Linux; Android 15; SM-S931B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36',
-    platform: 'Linux armv81',
-    vendor: 'Google Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 8,
-    deviceMemory: 12,
-    screenWidth: 411,
-    screenHeight: 891,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Qualcomm',
-    webglRenderer: 'Adreno (TM) 830',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 48000,
-  ),
-  DeviceProfile(
-    name: 'Samsung Galaxy S24',
-    userAgent:
-        'Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.7049.111 Mobile Safari/537.36',
-    platform: 'Linux armv81',
-    vendor: 'Google Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 8,
-    deviceMemory: 8,
-    screenWidth: 411,
-    screenHeight: 891,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Qualcomm',
-    webglRenderer: 'Adreno (TM) 750',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 48000,
-  ),
-  DeviceProfile(
-    name: 'Google Pixel 9',
-    userAgent:
-        'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36',
-    platform: 'Linux armv81',
-    vendor: 'Google Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 9,
-    deviceMemory: 12,
-    screenWidth: 412,
-    screenHeight: 892,
-    devicePixelRatio: 2.625,
-    maxTouchPoints: 5,
-    webglVendor: 'ARM',
-    webglRenderer: 'Immortalis-G925',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 48000,
-  ),
-  DeviceProfile(
-    name: 'Google Pixel 8',
-    userAgent:
-        'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.39 Mobile Safari/537.36',
-    platform: 'Linux armv81',
-    vendor: 'Google Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 8,
-    deviceMemory: 8,
-    screenWidth: 412,
-    screenHeight: 892,
-    devicePixelRatio: 2.625,
-    maxTouchPoints: 5,
-    webglVendor: 'ARM',
-    webglRenderer: 'Mali-G715',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 48000,
-  ),
 ];
 
 final _rng = Random();
 
-DeviceProfile randomProfile() {
-  return kDeviceProfiles[_rng.nextInt(kDeviceProfiles.length)];
+DeviceProfile randomProfile({DeviceProfile? except}) {
+  if (except == null || kDeviceProfiles.length <= 1) {
+    return kDeviceProfiles[_rng.nextInt(kDeviceProfiles.length)];
+  }
+  // Loại bỏ profile cũ để đảm bảo UA thực sự đổi
+  final pool = kDeviceProfiles.where((p) => p.name != except.name).toList();
+  return pool[_rng.nextInt(pool.length)];
 }
 
 String buildAntiFingerprintScript(DeviceProfile p) {

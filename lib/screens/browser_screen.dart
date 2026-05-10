@@ -231,7 +231,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _profile = randomProfile();
     final p = context.read<AppProvider>();
     final startUrl = widget.startUrl ?? p.loginUrl;
-    _initController(startUrl, incognito: p.incognitoMode);
+    unawaited(_initController(startUrl, incognito: p.incognitoMode));
 
     // Show UA toast after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -395,11 +395,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
         !u.contains('twostep');
   }
 
-  void _initController(String startUrl, {bool incognito = false}) {
+  Future<void> _initController(String startUrl, {bool incognito = false}) async {
     final p = context.read<AppProvider>();
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent(_profile.userAgent)
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (url) {
@@ -567,11 +568,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
       );
 
-    // Luôn xóa cookies trước mỗi phiên để tránh bị flag
-    unawaited(WebViewCookieManager().clearCookies());
+    // Luôn xóa cookies TRƯỚC khi load để tránh request đầu mang theo cookies cũ
+    await WebViewCookieManager().clearCookies();
+    if (!mounted) return;
 
-    _controller.loadRequest(Uri.parse(startUrl));
-    setState(() => _currentUrl = startUrl);
+    await _controller.loadRequest(Uri.parse(startUrl));
+    if (mounted) setState(() => _currentUrl = startUrl);
   }
 
   void _handleJsMessage(String message) {
@@ -1080,15 +1082,17 @@ try{
 window.__fpPatched=false;
 ''');
 
-    // 2. Đổi sang device profile mới (UA được re-inject qua buildAntiFingerprintScript khi load trang)
+    // 2. Đổi sang device profile mới (đảm bảo KHÁC profile cũ) + apply UA
+    final newProfile = randomProfile(except: _profile);
     setState(() {
-      _profile = randomProfile();
+      _profile = newProfile;
       _lastAutoFillUrl = null;
       _lastOtpPageUrl = null;
       _otpAutoSubmitting = false;
       _loginAttemptTime = null;
       _passedOtpPage = false;
     });
+    await _controller.setUserAgent(_profile.userAgent);
 
     // 3. Đổi 5G nếu được bật
     if (p.shortcut5gEnabled) {
@@ -1384,11 +1388,13 @@ window.__fpPatched=false;
           IconButton(
             icon: const Icon(Icons.shuffle, color: AppColors.secondary, size: 20),
             tooltip: 'Đổi User Agent ngẫu nhiên',
-            onPressed: () {
+            onPressed: () async {
+              final newProfile = randomProfile(except: _profile);
               setState(() {
-                _profile = randomProfile();
+                _profile = newProfile;
                 _lastAutoFillUrl = null;
               });
+              await _controller.setUserAgent(_profile.userAgent);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('UA: ${_profile.name}  •  ${_shortUaLabel(_profile.userAgent)}'),
