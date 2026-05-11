@@ -89,6 +89,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   int _otpFreezeRetryCount = 0;
   static const int _maxOtpFreezeRetries = 3;
 
+  // Page freeze watchdog toàn cục — 30s không có navigation nào → recover
+  Timer? _pageFreezeTimer;
+  static const Duration _pageFreezeDuration = Duration(seconds: 30);
+
   // Overlay for status text (above iOS platform WebView)
   OverlayEntry? _statusOverlay;
 
@@ -230,11 +234,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
   var text = document.body ? document.body.innerText : '';
 
   // CRITICAL keywords — luôn check kể cả trên login page
-  // (reCAPTCHA/bot detection messages — không thể là lỗi login bình thường)
+  // (reCAPTCHA/bot detection/server-block messages — không phải lỗi login bình thường)
   var criticalKws = [
     'reCAPTCHA 認証失敗','reCAPTCHA認証','reCAPTCHAの認証',
     '認証に失敗','認証失敗しました',
     'ロボットではありません','アクセスが一時的に制限',
+    // Login error sau khi click → server block (đặc trưng cho bot detection)
+    '時間をおいてから再度','時間をおいてから','時間をおいて再度',
   ];
   for (var k = 0; k < criticalKws.length; k++) {
     if (text.indexOf(criticalKws[k]) >= 0) {
@@ -410,11 +416,28 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _statusOverlay?.remove();
     _statusOverlay = null;
     _otpFreezeTimer?.cancel();
+    _pageFreezeTimer?.cancel();
     for (final c in _domWaitCompleters.values) {
       if (!c.isCompleted) c.complete();
     }
     _domWaitCompleters.clear();
     super.dispose();
+  }
+
+  /// Reset 30s page-freeze watchdog. Gọi mỗi lần có navigation hoặc activity.
+  /// Khi timer cháy → trang đứng 30s không có gì xảy ra → full recover.
+  void _resetPageFreezeWatchdog() {
+    _pageFreezeTimer?.cancel();
+    if (!mounted) return;
+    _pageFreezeTimer = Timer(_pageFreezeDuration, () {
+      if (!mounted) return;
+      // Đang trong các flow đã extract xong → không recover (đã pop screen rồi)
+      if (_resultChecked || _orderStatusChecked) return;
+      // Đã đạt max captcha retries → skip
+      if (_captchaRetryCount >= _maxCaptchaRetries) return;
+      _setStatus('⏰ Trang đứng 30s — auto recover...');
+      unawaited(_recoverAndRetry());
+    });
   }
 
   bool _isLoginPage(String url) {
@@ -440,6 +463,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (url) {
+            // Có navigation → reset 30s freeze watchdog
+            _resetPageFreezeWatchdog();
             // Nếu đang ở trang OTP và URL thay đổi → clear status "Đang xác nhận"
             final wasOnOtpPage =
                 _lastOtpPageUrl != null && _currentUrl == _lastOtpPageUrl;
@@ -479,6 +504,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
             }
           },
           onPageFinished: (url) async {
+            // Reset freeze watchdog mỗi khi page load xong
+            _resetPageFreezeWatchdog();
             setState(() {
               _currentUrl = url;
               _loading = false;
@@ -1190,6 +1217,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// reCAPTCHA / block detected: clear cookies → đổi profile → 5G → retry login
   Future<void> _recoverAndRetry() async {
     if (!mounted) return;
+    // Cancel freeze watchdog — recovery sẽ tự navigate → onPageStarted reset lại
+    _pageFreezeTimer?.cancel();
+    _pageFreezeTimer = null;
     _captchaRetryCount++;
     // Capture context-dependent values trước await
     final p = context.read<AppProvider>();
