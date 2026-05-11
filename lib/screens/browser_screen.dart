@@ -189,7 +189,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
 })();
 ''';
 
-  // Phát hiện reCAPTCHA / trang bị block — KHÔNG chạy trên trang OTP hoặc login
+  // Phát hiện reCAPTCHA challenge / trang bị block.
+  // CHỈ trigger khi có challenge dialog THẬT (puzzle 9 ô) hoặc error message rõ ràng.
+  // Pokemon Center load reCAPTCHA badge bình thường (invisible v3) → KHÔNG được trigger
+  // chỉ vì có iframe recaptcha trên trang.
   static const String _captchaDetectJs = '''
 (function() {
   // Bỏ qua nếu đang ở trang OTP
@@ -197,17 +200,33 @@ class _BrowserScreenState extends State<BrowserScreen> {
   for (var i = 0; i < otpSels.length; i++) {
     if (document.querySelector(otpSels[i])) return;
   }
-  // reCAPTCHA element visible (check trên mọi trang kể cả login)
-  var cap = document.querySelector('.g-recaptcha,[data-sitekey],iframe[src*="recaptcha"],iframe[src*="captcha"]');
-  if (cap && cap.offsetParent !== null) {
-    window.FlutterChannel.postMessage('{"type":"captchaError","reason":"element"}');
+
+  // CHALLENGE DIALOG (puzzle/checkbox visible) — KHÔNG phải badge ẩn
+  // Phân biệt: challenge iframe có size lớn (>200px), badge chỉ ~60-256px
+  // và badge thường có style transform/opacity/visibility = hidden
+  var challengeIframes = document.querySelectorAll('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="captcha"]');
+  for (var i = 0; i < challengeIframes.length; i++) {
+    var f = challengeIframes[i];
+    if (f.offsetParent === null) continue;
+    var r = f.getBoundingClientRect();
+    // Challenge dialog kích thước lớn (>= 250px cả 2 chiều). Badge chỉ ~60×60 hoặc 256×60
+    if (r.width >= 250 && r.height >= 250) {
+      window.FlutterChannel.postMessage('{"type":"captchaError","reason":"challenge-dialog"}');
+      return;
+    }
+  }
+  // Challenge UI elements (puzzle, image select, audio)
+  var chUI = document.querySelector('.rc-imageselect, .rc-audiochallenge, .recaptcha-checkbox-checked, .hcaptcha-checkbox-checked');
+  if (chUI && chUI.offsetParent !== null) {
+    window.FlutterChannel.postMessage('{"type":"captchaError","reason":"challenge-ui"}');
     return;
   }
+
   // Bỏ qua keyword check nếu đang ở trang login (form email hiện diện)
-  // → tránh false positive: lỗi đăng nhập thông thường không phải captcha/block
   var loginForm = document.querySelector('input[type="email"], input[name="loginEmail"], input[name="email"]');
   if (loginForm && loginForm.offsetParent !== null) return;
-  // Error messages đặc trưng của Pokémon Center (chỉ check trên trang KHÔNG phải login)
+
+  // Error messages đặc trưng (chỉ check trên trang KHÔNG phải login/OTP)
   var kws = [
     'reCAPTCHA 認証失敗','reCAPTCHA認証','認証に失敗','認証失敗しました',
     'エラーが発生しました','エラー発生しました','システムエラー',
