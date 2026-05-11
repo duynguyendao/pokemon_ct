@@ -40,251 +40,264 @@ class DeviceProfile {
   });
 }
 
-// Chỉ dùng Safari iOS profiles vì WKWebView KHÔNG thể giả lập
-// Sec-CH-UA / Sec-CH-UA-Mobile / Sec-CH-UA-Platform headers (Chrome/Android cần
-// các header này → server detect bot ngay nếu UA là Chrome nhưng thiếu headers).
-const List<DeviceProfile> kDeviceProfiles = [
-  DeviceProfile(
+// ─── Base devices × iOS versions = expanded profile pool ────────────────────
+// Chỉ Safari iOS — WKWebView không gửi được Sec-CH-UA headers nên Chrome UA sẽ
+// bị detect ngay.
+class _BaseDevice {
+  final String name;
+  final int screenWidth;
+  final int screenHeight;
+  final int memory;
+  final int hwConcurrency;
+  final double devicePixelRatio;
+  final bool isIPad;
+  final List<String> iosVersions;
+  const _BaseDevice({
+    required this.name,
+    required this.screenWidth,
+    required this.screenHeight,
+    required this.memory,
+    this.hwConcurrency = 6,
+    this.devicePixelRatio = 3.0,
+    this.isIPad = false,
+    required this.iosVersions,
+  });
+}
+
+const List<_BaseDevice> _baseDevices = [
+  // iPhone 16 series (iOS 18 only)
+  _BaseDevice(
     name: 'iPhone 16 Pro Max',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 8,
-    screenWidth: 440,
-    screenHeight: 956,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 440, screenHeight: 956, memory: 8,
+    iosVersions: ['18.5', '18.4.1', '18.4', '18.3.2', '18.3'],
   ),
-  DeviceProfile(
+  _BaseDevice(
     name: 'iPhone 16 Pro',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4.1 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 8,
-    screenWidth: 402,
-    screenHeight: 874,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 402, screenHeight: 874, memory: 8,
+    iosVersions: ['18.5', '18.4.1', '18.4', '18.3.2', '18.3'],
   ),
-  DeviceProfile(
+  _BaseDevice(
+    name: 'iPhone 16 Plus',
+    screenWidth: 430, screenHeight: 932, memory: 8,
+    iosVersions: ['18.5', '18.4', '18.3.1', '18.3'],
+  ),
+  _BaseDevice(
     name: 'iPhone 16',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 8,
-    screenWidth: 393,
-    screenHeight: 852,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 393, screenHeight: 852, memory: 8,
+    iosVersions: ['18.5', '18.4.1', '18.4', '18.3'],
   ),
-  DeviceProfile(
+  // iPhone 15 series (iOS 17-18)
+  _BaseDevice(
     name: 'iPhone 15 Pro Max',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 8,
-    screenWidth: 430,
-    screenHeight: 932,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 430, screenHeight: 932, memory: 8,
+    iosVersions: ['18.4', '18.3', '18.2', '17.7.2', '17.6.1'],
   ),
-  DeviceProfile(
+  _BaseDevice(
     name: 'iPhone 15 Pro',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3.2 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 8,
-    screenWidth: 393,
-    screenHeight: 852,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 393, screenHeight: 852, memory: 8,
+    iosVersions: ['18.4', '18.3.2', '18.2.1', '17.7.1', '17.6'],
   ),
-  DeviceProfile(
+  _BaseDevice(
     name: 'iPhone 15 Plus',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 6,
-    screenWidth: 430,
-    screenHeight: 932,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 430, screenHeight: 932, memory: 6,
+    iosVersions: ['18.3', '18.2', '17.7', '17.6.1'],
   ),
-  DeviceProfile(
+  _BaseDevice(
     name: 'iPhone 15',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.7 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 6,
-    screenWidth: 393,
-    screenHeight: 852,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 393, screenHeight: 852, memory: 6,
+    iosVersions: ['18.3', '18.2', '17.7.2', '17.6'],
   ),
-  DeviceProfile(
+  // iPhone 14 series (iOS 17-18)
+  _BaseDevice(
     name: 'iPhone 14 Pro Max',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6.1 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 6,
-    screenWidth: 430,
-    screenHeight: 932,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 430, screenHeight: 932, memory: 6,
+    iosVersions: ['18.3', '18.2', '17.7.1', '17.6.1'],
   ),
-  DeviceProfile(
+  _BaseDevice(
     name: 'iPhone 14 Pro',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5.1 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 6,
-    screenWidth: 393,
-    screenHeight: 852,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 393, screenHeight: 852, memory: 6,
+    iosVersions: ['18.3.1', '18.2', '17.7', '17.5.1'],
   ),
-  DeviceProfile(
+  _BaseDevice(
+    name: 'iPhone 14 Plus',
+    screenWidth: 428, screenHeight: 926, memory: 6,
+    iosVersions: ['18.2', '17.7', '17.6'],
+  ),
+  _BaseDevice(
     name: 'iPhone 14',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 6,
-    screenWidth: 390,
-    screenHeight: 844,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 390, screenHeight: 844, memory: 6,
+    iosVersions: ['18.2', '17.6.1', '17.5.1', '17.4.1'],
   ),
-  DeviceProfile(
+  // iPhone 13 series (iOS 16-18)
+  _BaseDevice(
+    name: 'iPhone 13 Pro Max',
+    screenWidth: 428, screenHeight: 926, memory: 6,
+    iosVersions: ['18.1', '17.6', '17.4', '16.7.10'],
+  ),
+  _BaseDevice(
     name: 'iPhone 13 Pro',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja', 'en-US'],
-    hardwareConcurrency: 6,
-    deviceMemory: 6,
-    screenWidth: 390,
-    screenHeight: 844,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 390, screenHeight: 844, memory: 6,
+    iosVersions: ['18.1', '17.5', '17.3', '16.7.10'],
   ),
-  DeviceProfile(
+  _BaseDevice(
     name: 'iPhone 13',
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_7_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-    platform: 'iPhone',
-    vendor: 'Apple Computer, Inc.',
-    languages: ['ja-JP', 'ja'],
-    hardwareConcurrency: 6,
-    deviceMemory: 4,
-    screenWidth: 390,
-    screenHeight: 844,
-    devicePixelRatio: 3.0,
-    maxTouchPoints: 5,
-    webglVendor: 'Apple Inc.',
-    webglRenderer: 'Apple GPU',
-    timezone: 'Asia/Tokyo',
-    timezoneOffset: -540,
-    colorGamut: 'p3',
-    audioSampleRate: 44100,
+    screenWidth: 390, screenHeight: 844, memory: 4,
+    iosVersions: ['18.0', '17.6.1', '17.4.1', '16.7.8'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 13 mini',
+    screenWidth: 375, screenHeight: 812, memory: 4,
+    iosVersions: ['17.7', '17.5', '16.7.10'],
+  ),
+  // iPhone 12 series (iOS 16-18)
+  _BaseDevice(
+    name: 'iPhone 12 Pro Max',
+    screenWidth: 428, screenHeight: 926, memory: 6,
+    iosVersions: ['18.0', '17.6', '17.4', '16.7.10'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 12 Pro',
+    screenWidth: 390, screenHeight: 844, memory: 6,
+    iosVersions: ['17.6', '17.4', '16.7.10'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 12',
+    screenWidth: 390, screenHeight: 844, memory: 4,
+    iosVersions: ['17.5.1', '17.4.1', '16.7.8'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 12 mini',
+    screenWidth: 375, screenHeight: 812, memory: 4,
+    iosVersions: ['17.4', '17.2', '16.7.10'],
+  ),
+  // iPhone 11 series (iOS 16-17 mostly)
+  _BaseDevice(
+    name: 'iPhone 11 Pro Max',
+    screenWidth: 414, screenHeight: 896, memory: 4,
+    iosVersions: ['17.4', '16.7.10', '16.7.8'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 11 Pro',
+    screenWidth: 375, screenHeight: 812, memory: 4,
+    iosVersions: ['17.5', '16.7.10', '16.7.8'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 11',
+    screenWidth: 414, screenHeight: 896, memory: 4,
+    iosVersions: ['17.4.1', '17.3', '16.7.10'],
+  ),
+  // iPhone SE (DPR = 2.0, không phải 3.0 như các iPhone khác)
+  _BaseDevice(
+    name: 'iPhone SE (3rd gen)',
+    screenWidth: 375, screenHeight: 667, memory: 4,
+    devicePixelRatio: 2.0,
+    iosVersions: ['18.2', '17.6', '17.4', '16.7.10'],
+  ),
+  _BaseDevice(
+    name: 'iPhone SE (2nd gen)',
+    screenWidth: 375, screenHeight: 667, memory: 3,
+    devicePixelRatio: 2.0,
+    iosVersions: ['17.4', '16.7.10', '16.7.8'],
+  ),
+  // ─── iPad (cùng WebKit engine, an toàn) ────────────────────────────────
+  // Tất cả iPad: DPR = 2.0, maxTouchPoints = 5
+  _BaseDevice(
+    name: 'iPad Pro 13" M4',
+    screenWidth: 1024, screenHeight: 1366, memory: 8,
+    hwConcurrency: 9, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.5', '18.4.1', '18.4', '18.3.2'],
+  ),
+  _BaseDevice(
+    name: 'iPad Pro 11" M4',
+    screenWidth: 834, screenHeight: 1194, memory: 8,
+    hwConcurrency: 9, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.5', '18.4', '18.3.1'],
+  ),
+  _BaseDevice(
+    name: 'iPad Pro 12.9" M2',
+    screenWidth: 1024, screenHeight: 1366, memory: 8,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.3', '17.6.1', '17.4'],
+  ),
+  _BaseDevice(
+    name: 'iPad Pro 11" M2',
+    screenWidth: 834, screenHeight: 1194, memory: 8,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.3', '17.6', '17.4'],
+  ),
+  _BaseDevice(
+    name: 'iPad Air 13" M2',
+    screenWidth: 1024, screenHeight: 1366, memory: 8,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.4', '18.3', '17.7'],
+  ),
+  _BaseDevice(
+    name: 'iPad Air 11" M2',
+    screenWidth: 820, screenHeight: 1180, memory: 8,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.4', '18.3', '17.7'],
+  ),
+  _BaseDevice(
+    name: 'iPad Air 5 (M1)',
+    screenWidth: 820, screenHeight: 1180, memory: 8,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.2', '17.6.1', '17.4', '16.7.10'],
+  ),
+  _BaseDevice(
+    name: 'iPad (10th gen)',
+    screenWidth: 810, screenHeight: 1080, memory: 4,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.1', '17.6', '17.4', '16.7.10'],
+  ),
+  _BaseDevice(
+    name: 'iPad mini 7 (A17 Pro)',
+    screenWidth: 744, screenHeight: 1133, memory: 8,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.4', '18.3', '18.2'],
+  ),
+  _BaseDevice(
+    name: 'iPad mini 6',
+    screenWidth: 744, screenHeight: 1133, memory: 4,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.1', '17.6', '17.4', '16.7.10'],
   ),
 ];
+
+List<DeviceProfile> _generateProfiles() {
+  final result = <DeviceProfile>[];
+  for (final dev in _baseDevices) {
+    for (final ios in dev.iosVersions) {
+      final iosUnder = ios.replaceAll('.', '_');
+      // iPad UA: "iPad; CPU OS ..." (không có "iPhone")
+      // iPhone UA: "iPhone; CPU iPhone OS ..."
+      final deviceTag = dev.isIPad ? 'iPad' : 'iPhone';
+      final cpuTag = dev.isIPad ? 'CPU OS' : 'CPU iPhone OS';
+      result.add(DeviceProfile(
+        name: '${dev.name} · iOS $ios',
+        userAgent:
+            'Mozilla/5.0 ($deviceTag; $cpuTag $iosUnder like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/$ios Mobile/15E148 Safari/604.1',
+        platform: dev.isIPad ? 'iPad' : 'iPhone',
+        vendor: 'Apple Computer, Inc.',
+        languages: const ['ja-JP', 'ja', 'en-US'],
+        hardwareConcurrency: dev.hwConcurrency,
+        deviceMemory: dev.memory,
+        screenWidth: dev.screenWidth,
+        screenHeight: dev.screenHeight,
+        devicePixelRatio: dev.devicePixelRatio,
+        maxTouchPoints: 5,
+        webglVendor: 'Apple Inc.',
+        webglRenderer: 'Apple GPU',
+        timezone: 'Asia/Tokyo',
+        timezoneOffset: -540,
+        colorGamut: 'p3',
+        audioSampleRate: 44100,
+      ));
+    }
+  }
+  return List.unmodifiable(result);
+}
+
+final List<DeviceProfile> kDeviceProfiles = _generateProfiles();
 
 final _rng = Random();
 
@@ -302,64 +315,37 @@ String buildAntiFingerprintScript(DeviceProfile p) {
   final noiseSeed = _rng.nextInt(0xFFFF);
   final availH = p.screenHeight - 40 - _rng.nextInt(20);
 
-  // Safari/iOS profile vs Chrome/Android profile — nhiều thứ khác nhau hoàn toàn
-  final isSafari = p.userAgent.contains('Safari') && !p.userAgent.contains('Chrome');
+  // Tất cả profile giờ là Safari iOS — script hardcode behavior phù hợp
   // appVersion = phần sau "Mozilla/" trong UA
   final appVersion = p.userAgent.startsWith('Mozilla/')
       ? p.userAgent.substring('Mozilla/'.length)
       : '5.0 (Mobile)';
 
-  // Chrome profiles: plugins có PDF Viewer; Safari iOS: PluginArray rỗng
-  final pluginsJs = isSafari
-      ? 'def(nav, "plugins", Object.freeze([]));'
-      : '''def(nav, 'plugins', Object.freeze([
-      { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', suffixes: 'pdf' },
-      { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', suffixes: 'pdf' },
-      { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', suffixes: 'pdf' },
-    ]));''';
+  // Safari iOS: PluginArray rỗng
+  const pluginsJs = 'def(nav, "plugins", Object.freeze([]));';
 
-  // Safari không có window.chrome; Chrome cần nó
-  final chromeJs = isSafari
-      ? '''try { delete window.chrome; } catch(e) {}
-    Object.defineProperty(window, 'chrome', { get: () => undefined, configurable: true, enumerable: false });'''
-      : '''window.chrome = {
-      app: { isInstalled: false, runningState: 'cannot_run', getDetails: function(){ return null; }, getIsInstalled: function(){ return false; } },
-      runtime: {
-        id: undefined,
-        connect: function(){ return { onMessage: { addListener: function(){} }, onDisconnect: { addListener: function(){} }, postMessage: function(){} }; },
-        sendMessage: function(){},
-        onConnect: { addListener: function(){} },
-        onMessage: { addListener: function(){} },
-        getPlatformInfo: function(cb) {
-          var info = { os: 'android', arch: 'arm', nacl_arch: 'arm' };
-          if (cb) cb(info);
-          return Promise.resolve(info);
-        },
-      },
-      loadTimes: function(){ return { firstPaintTime: 0, firstPaintAfterLoadTime: 0, requestTime: Date.now() / 1000, startLoadTime: Date.now() / 1000 }; },
-      csi: function(){ return { startE: Date.now(), onloadT: Date.now(), pageT: 1.0, tran: 15 }; },
-    };''';
+  // Safari không có window.chrome
+  const chromeJs = '''try { delete window.chrome; } catch(e) {}
+    Object.defineProperty(window, 'chrome', { get: () => undefined, configurable: true, enumerable: false });''';
 
-  // Safari iOS có navigator.standalone; Chrome không có
-  final standaloneJs = isSafari
-      ? 'def(nav, "standalone", false);'
-      : '';
-
-  // Chrome/Android — extract version + model for userAgentData
-  final chromeMatch = RegExp(r'Chrome/(\d+)').firstMatch(p.userAgent);
-  final chromeVersion = chromeMatch?.group(1) ?? '136';
-  final androidVerMatch = RegExp(r'Android (\d+)').firstMatch(p.userAgent);
-  final androidVersion = androidVerMatch?.group(1) ?? '15';
-  final parenMatch = RegExp(r'\(([^)]+)\)').firstMatch(p.userAgent);
-  final parenParts = (parenMatch?.group(1) ?? '').split(';');
-  final androidModel = isSafari
-      ? ''
-      : (parenParts.length >= 3 ? parenParts[2].trim() : '');
+  // Safari iOS có navigator.standalone
+  const standaloneJs = 'def(nav, "standalone", false);';
 
   return '''
 (function() {
   if (window.__fpPatched) return;
   window.__fpPatched = true;
+
+  // ── 0. Wipe storage NGAY trước khi page scripts đọc được ────────────────
+  try{localStorage.clear();}catch(e){}
+  try{sessionStorage.clear();}catch(e){}
+  try{
+    if(indexedDB && indexedDB.databases){
+      indexedDB.databases().then(function(dbs){
+        dbs.forEach(function(db){try{indexedDB.deleteDatabase(db.name);}catch(e){}});
+      });
+    }
+  }catch(e){}
 
   try {
     const nav = navigator;
@@ -374,6 +360,16 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       } catch(e) {}
     }
 
+    // Helper: pin function.toString để không lộ patch
+    function nativeStr(fn, name) {
+      try {
+        Object.defineProperty(fn, 'toString', {
+          value: function(){ return 'function ' + (name || fn.name || '') + '() { [native code] }'; },
+          writable: false, configurable: true,
+        });
+      } catch(e) {}
+    }
+
     // ── 1. navigator ───────────────────────────────────────────────────────
     def(nav, 'platform',            '${p.platform}');
     def(nav, 'vendor',              '${p.vendor}');
@@ -382,14 +378,16 @@ String buildAntiFingerprintScript(DeviceProfile p) {
     def(nav, 'appName',             'Netscape');
     def(nav, 'product',             'Gecko');
     def(nav, 'hardwareConcurrency', ${p.hardwareConcurrency});
-    def(nav, 'deviceMemory',        ${p.deviceMemory});
+    // Safari iOS KHÔNG hỗ trợ navigator.deviceMemory — phải để undefined
+    try { delete nav.deviceMemory; } catch(e) {}
+    try { Object.defineProperty(nav, 'deviceMemory', { get: () => undefined, configurable: true }); } catch(e) {}
     def(nav, 'language',            '${p.languages.first}');
     def(nav, 'languages',           Object.freeze([$langs]));
     def(nav, 'maxTouchPoints',      ${p.maxTouchPoints});
     def(nav, 'doNotTrack',          null);
     def(nav, 'cookieEnabled',       true);
     def(nav, 'onLine',              true);
-    // CRITICAL: webdriver must be undefined (non-existent), not false — real browsers don't define this
+    // webdriver: real browsers don't define this
     try { delete nav.__proto__.webdriver; } catch(e) {}
     try { Object.defineProperty(nav, 'webdriver', { get: () => undefined, configurable: true, enumerable: false }); } catch(e) {}
     $standaloneJs
@@ -399,11 +397,19 @@ String buildAntiFingerprintScript(DeviceProfile p) {
     def(screen, 'height',      ${p.screenHeight});
     def(screen, 'availWidth',  ${p.screenWidth});
     def(screen, 'availHeight', $availH);
+    def(screen, 'availLeft',   0);
+    def(screen, 'availTop',    0);
     def(screen, 'colorDepth',  24);
     def(screen, 'pixelDepth',  24);
     def(window, 'devicePixelRatio', ${p.devicePixelRatio});
     def(window, 'outerWidth',  ${p.screenWidth});
     def(window, 'outerHeight', ${p.screenHeight});
+    def(window, 'innerWidth',  ${p.screenWidth});
+    def(window, 'innerHeight', $availH);
+    def(window, 'screenX',     0);
+    def(window, 'screenY',     0);
+    def(window, 'screenLeft',  0);
+    def(window, 'screenTop',   0);
 
     // ── 3. WebGL ───────────────────────────────────────────────────────────
     const glVendor   = '${p.webglVendor}';
@@ -416,22 +422,51 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         ctx.prototype.getParameter = function(param) {
           if (param === 37445) return glVendor;
           if (param === 37446) return glRenderer;
+          // UNMASKED_VENDOR_WEBGL = 0x9245, UNMASKED_RENDERER_WEBGL = 0x9246
+          if (param === 0x9245) return glVendor;
+          if (param === 0x9246) return glRenderer;
           return orig.call(this, param);
         };
+        nativeStr(ctx.prototype.getParameter, 'getParameter');
+        // getExtension WEBGL_debug_renderer_info → consistent
+        const origExt = ctx.prototype.getExtension;
+        ctx.prototype.getExtension = function(name) {
+          return origExt.call(this, name);
+        };
+        nativeStr(ctx.prototype.getExtension, 'getExtension');
       });
 
-    // ── 4. Canvas noise ────────────────────────────────────────────────────
+    // ── 4. Canvas noise (toDataURL, toBlob, getImageData) ─────────────────
     const SEED = $noiseSeed;
     function lcg(s) { return (s * 1664525 + 1013904223) & 0xffffffff; }
 
     (function patchCanvas() {
-      const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+      const origToDataURL    = HTMLCanvasElement.prototype.toDataURL;
+      const origToBlob       = HTMLCanvasElement.prototype.toBlob;
       const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+
+      function _addNoise(canvas) {
+        try {
+          const ctx2 = canvas.getContext('2d');
+          if (!ctx2 || canvas.width === 0 || canvas.height === 0) return;
+          const img = origGetImageData.call(ctx2, 0, 0, Math.min(1, canvas.width), Math.min(1, canvas.height));
+          let s = SEED;
+          img.data[0] = (img.data[0] + (s & 3)) & 0xFF;
+          ctx2.putImageData(img, 0, 0);
+        } catch(e) {}
+      }
 
       HTMLCanvasElement.prototype.toDataURL = function() {
         _addNoise(this);
         return origToDataURL.apply(this, arguments);
       };
+      nativeStr(HTMLCanvasElement.prototype.toDataURL, 'toDataURL');
+
+      HTMLCanvasElement.prototype.toBlob = function() {
+        _addNoise(this);
+        return origToBlob.apply(this, arguments);
+      };
+      nativeStr(HTMLCanvasElement.prototype.toBlob, 'toBlob');
 
       CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
         const img = origGetImageData.call(this, x, y, w, h);
@@ -444,20 +479,24 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         }
         return img;
       };
-
-      function _addNoise(canvas) {
-        try {
-          const ctx2 = canvas.getContext('2d');
-          if (!ctx2 || canvas.width === 0) return;
-          const img = origGetImageData.call(ctx2, 0, 0, 1, 1);
-          let s = SEED;
-          img.data[0] = (img.data[0] + (s & 3)) & 0xFF;
-          ctx2.putImageData(img, 0, 0);
-        } catch(e) {}
-      }
+      nativeStr(CanvasRenderingContext2D.prototype.getImageData, 'getImageData');
     })();
 
-    // ── 5. AudioContext ────────────────────────────────────────────────────
+    // ── 4b. OffscreenCanvas noise (Safari iOS 16.4+ has it) ────────────────
+    (function patchOffscreen() {
+      if (typeof OffscreenCanvas === 'undefined') return;
+      try {
+        const origConvert = OffscreenCanvas.prototype.convertToBlob;
+        if (origConvert) {
+          OffscreenCanvas.prototype.convertToBlob = function() {
+            return origConvert.apply(this, arguments);
+          };
+          nativeStr(OffscreenCanvas.prototype.convertToBlob, 'convertToBlob');
+        }
+      } catch(e) {}
+    })();
+
+    // ── 5. AudioContext noise ─────────────────────────────────────────────
     (function patchAudio() {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
@@ -475,6 +514,19 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         get: function() { return ${p.audioSampleRate} + (SEED % 3); },
         configurable: true,
       });
+      // AnalyserNode.getFloatFrequencyData / getByteFrequencyData noise
+      if (window.AnalyserNode) {
+        const origFloat = AnalyserNode.prototype.getFloatFrequencyData;
+        AnalyserNode.prototype.getFloatFrequencyData = function(arr) {
+          origFloat.call(this, arr);
+          let s = SEED;
+          for (let i = 0; i < arr.length; i++) {
+            s = lcg(s);
+            arr[i] = arr[i] + ((s & 0xFF) / 0xFFFF) * 0.0001;
+          }
+        };
+        nativeStr(AnalyserNode.prototype.getFloatFrequencyData, 'getFloatFrequencyData');
+      }
     })();
 
     // ── 6. Timezone ────────────────────────────────────────────────────────
@@ -487,6 +539,7 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       };
       Intl.DateTimeFormat.prototype = origDTF.prototype;
       Date.prototype.getTimezoneOffset = function() { return ${p.timezoneOffset}; };
+      nativeStr(Date.prototype.getTimezoneOffset, 'getTimezoneOffset');
     })();
 
     // ── 7. Network & battery ───────────────────────────────────────────────
@@ -496,10 +549,9 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         downlink: 8 + (SEED % 5),
         rtt: 40 + (SEED % 30),
         saveData: false,
-        type: 'wifi',
+        type: 'cellular',
       });
     }
-
     if (!nav.getBattery) {
       nav.getBattery = () => Promise.resolve({
         charging: true, chargingTime: 0, dischargingTime: Infinity,
@@ -516,18 +568,20 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         }
         return origQuery(desc);
       };
+      nativeStr(navigator.permissions.query, 'query');
     }
 
-    // ── 9. chrome object — Safari không có, Chrome cần có ─────────────────
+    // ── 9. chrome object — Safari không có ────────────────────────────────
     try { delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array; } catch(e) {}
     try { delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise; } catch(e) {}
     try { delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol; } catch(e) {}
     $chromeJs
 
-    // ── 10. Plugins — Safari iOS: rỗng; Chrome: PDF Viewer ────────────────
+    // ── 10. Plugins — Safari iOS rỗng ─────────────────────────────────────
     $pluginsJs
+    try { def(nav, 'mimeTypes', Object.freeze([])); } catch(e) {}
 
-    // ── 11. matchMedia — color gamut + mobile pointer/hover consistency ───────
+    // ── 11. matchMedia — color gamut + mobile pointer/hover ───────────────
     (function patchMatchMedia() {
       const origMQ = window.matchMedia;
       if (!origMQ) return;
@@ -544,57 +598,35 @@ String buildAntiFingerprintScript(DeviceProfile p) {
             Object.defineProperty(result, 'matches', { get: () => q.includes('coarse'), configurable: true });
           } else if (q.includes('hover')) {
             Object.defineProperty(result, 'matches', { get: () => q.includes('none'), configurable: true });
+          } else if (q.includes('prefers-color-scheme')) {
+            Object.defineProperty(result, 'matches', { get: () => q.includes('light'), configurable: true });
           }
         } catch(e) {}
         return result;
       };
+      nativeStr(window.matchMedia, 'matchMedia');
     })();
 
-    // ── 12. UA Client Hints (userAgentData) — Chrome/Android only ─────────
-    (function patchUAClientHints() {
-      if (!nav.userAgent.includes('Chrome')) return;
-      const brands = [
-        { brand: 'Not/A)Brand',   version: '8' },
-        { brand: 'Chromium',      version: '$chromeVersion' },
-        { brand: 'Google Chrome', version: '$chromeVersion' },
-      ];
-      const hi = {
-        brands: brands, mobile: true, platform: 'Android',
-        platformVersion: '$androidVersion', architecture: 'arm', bitness: '64',
-        model: '$androidModel', uaFullVersion: '$chromeVersion.0.0.0',
-        fullVersionList: brands.map(function(b){ return {brand:b.brand, version:'$chromeVersion.0.0.0'}; }),
-      };
-      def(nav, 'userAgentData', {
-        brands: brands, mobile: true, platform: 'Android',
-        toJSON: function(){ return {brands:brands, mobile:true, platform:'Android'}; },
-        getHighEntropyValues: function(){ return Promise.resolve(hi); },
-      });
-    })();
+    // ── 12. userAgentData — Safari iOS KHÔNG có, đảm bảo undefined ────────
+    try { delete nav.userAgentData; } catch(e) {}
+    try { Object.defineProperty(nav, 'userAgentData', { get: () => undefined, configurable: true }); } catch(e) {}
 
-    // ── 13. Block RTCPeerConnection JS-level (IP leak) ─────────────────────
+    // ── 13. Block RTCPeerConnection (IP leak) ──────────────────────────────
     try { Object.defineProperty(window,'RTCPeerConnection',       {value:undefined,configurable:true}); } catch(e) {}
     try { Object.defineProperty(window,'webkitRTCPeerConnection', {value:undefined,configurable:true}); } catch(e) {}
+    try { Object.defineProperty(window,'RTCIceCandidate',         {value:undefined,configurable:true}); } catch(e) {}
+    try { Object.defineProperty(window,'RTCSessionDescription',   {value:undefined,configurable:true}); } catch(e) {}
 
-    // ── 14. performance.memory ─────────────────────────────────────────────
-    (function(){
-      if (!window.performance) return;
-      try {
-        Object.defineProperty(window.performance,'memory',{
-          get:function(){ return {
-            usedJSHeapSize:  18000000 + ((SEED*7)%8000000),
-            totalJSHeapSize: 40000000 + ((SEED*3)%12000000),
-            jsHeapSizeLimit: 2197815296,
-          };}, configurable:true
-        });
-      } catch(e) {}
-    })();
+    // ── 14. performance.memory (Chrome only) — Safari không có ────────────
+    try { delete window.performance.memory; } catch(e) {}
+    try { Object.defineProperty(window.performance, 'memory', { get: () => undefined, configurable: true }); } catch(e) {}
 
     // ── 15. document.visibilityState — always visible ──────────────────────
     try { Object.defineProperty(document,'visibilityState',{get:()=>'visible',configurable:true}); } catch(e) {}
     try { Object.defineProperty(document,'hidden',         {get:()=>false,    configurable:true}); } catch(e) {}
 
-    // ── 16. pdfViewerEnabled (Chrome: true, Safari: false) ────────────────
-    def(nav, 'pdfViewerEnabled', ${!isSafari});
+    // ── 16. pdfViewerEnabled — Safari iOS: false ──────────────────────────
+    def(nav, 'pdfViewerEnabled', false);
 
     // ── 17. screen.orientation ────────────────────────────────────────────
     try {
@@ -603,48 +635,115 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       });
     } catch(e) {}
 
-    // ── 18. navigator.mimeTypes — consistent with plugins ────────────────────
-    (function patchMimeTypes() {
-      if (!nav.userAgent.includes('Chrome')) return;
+    // ── 18. MediaDevices — iOS Safari: trả empty list khi chưa cấp quyền ─
+    if (nav.mediaDevices) {
       try {
-        const pdf = { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: (nav.plugins && nav.plugins[0]) || {} };
-        const pdf2 = { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: (nav.plugins && nav.plugins[0]) || {} };
-        def(nav, 'mimeTypes', Object.freeze([pdf, pdf2]));
+        nav.mediaDevices.enumerateDevices = function() {
+          return Promise.resolve([]);
+        };
+        nativeStr(nav.mediaDevices.enumerateDevices, 'enumerateDevices');
+      } catch(e) {}
+      // Block getUserMedia — không cho lộ device info
+      try {
+        nav.mediaDevices.getUserMedia = function() {
+          return Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
+        };
+        nativeStr(nav.mediaDevices.getUserMedia, 'getUserMedia');
+      } catch(e) {}
+    }
+
+    // ── 19. Speech synthesis voices — iOS Safari có set voices đặc trưng ─
+    (function patchSpeech() {
+      if (typeof speechSynthesis === 'undefined') return;
+      // iOS Safari thường có ~36 voices, KHÔNG để empty (bị flag là headless)
+      const iosVoices = [
+        { name: 'Kyoko', lang: 'ja-JP', localService: true, default: false, voiceURI: 'com.apple.voice.compact.ja-JP.Kyoko' },
+        { name: 'Otoya', lang: 'ja-JP', localService: true, default: false, voiceURI: 'com.apple.voice.compact.ja-JP.Otoya' },
+        { name: 'Samantha', lang: 'en-US', localService: true, default: true, voiceURI: 'com.apple.voice.compact.en-US.Samantha' },
+        { name: 'Daniel', lang: 'en-GB', localService: true, default: false, voiceURI: 'com.apple.voice.compact.en-GB.Daniel' },
+        { name: 'Karen', lang: 'en-AU', localService: true, default: false, voiceURI: 'com.apple.voice.compact.en-AU.Karen' },
+        { name: 'Moira', lang: 'en-IE', localService: true, default: false, voiceURI: 'com.apple.voice.compact.en-IE.Moira' },
+        { name: 'Tessa', lang: 'en-ZA', localService: true, default: false, voiceURI: 'com.apple.voice.compact.en-ZA.Tessa' },
+        { name: 'Rishi', lang: 'en-IN', localService: true, default: false, voiceURI: 'com.apple.voice.compact.en-IN.Rishi' },
+        { name: 'Yuna', lang: 'ko-KR', localService: true, default: false, voiceURI: 'com.apple.voice.compact.ko-KR.Yuna' },
+        { name: 'Tingting', lang: 'zh-CN', localService: true, default: false, voiceURI: 'com.apple.voice.compact.zh-CN.Tingting' },
+      ];
+      try {
+        speechSynthesis.getVoices = function() { return iosVoices; };
+        nativeStr(speechSynthesis.getVoices, 'getVoices');
       } catch(e) {}
     })();
 
-    // ── 19. Hide automation eval strings ─────────────────────────────────────
-    (function patchEval() {
-      const origEval = window.eval;
-      window.eval = function(code) {
-        return origEval.call(this, code);
-      };
-      window.eval.toString = function() { return 'function eval() { [native code] }'; };
-      Function.prototype.toString = (function(origToString) {
-        return function() {
-          const s = origToString.call(this);
-          if (s.includes('__puppeteer') || s.includes('__playwright') || s.includes('__webdriver')) {
-            return 'function () { [native code] }';
-          }
-          return s;
+    // ── 20. ClientRects sub-pixel jitter ──────────────────────────────────
+    (function patchRects() {
+      const origGBCR = Element.prototype.getBoundingClientRect;
+      const origGCR  = Element.prototype.getClientRects;
+      Element.prototype.getBoundingClientRect = function() {
+        const r = origGBCR.call(this);
+        const j = ((SEED % 100) / 100000);
+        return {
+          x: r.x + j, y: r.y + j,
+          top: r.top + j, left: r.left + j,
+          right: r.right + j, bottom: r.bottom + j,
+          width: r.width, height: r.height,
+          toJSON: function(){ return this; },
         };
-      })(Function.prototype.toString);
+      };
+      nativeStr(Element.prototype.getBoundingClientRect, 'getBoundingClientRect');
+      Element.prototype.getClientRects = function() {
+        return origGCR.call(this);
+      };
+      nativeStr(Element.prototype.getClientRects, 'getClientRects');
     })();
 
-    // ── 20. navigator.connection — mobile LTE/5G ──────────────────────────────
-    (function patchConnection() {
-      const conn = {
-        effectiveType: '4g',
-        downlink: 8 + (SEED % 5),
-        downlinkMax: Infinity,
-        rtt: 40 + (SEED % 30),
-        saveData: false,
-        type: 'cellular',
-        onchange: null,
-        ontypechange: null,
+    // ── 21. WebGPU — Safari iOS chưa có (đảm bảo undefined) ───────────────
+    try { delete nav.gpu; } catch(e) {}
+    try { Object.defineProperty(nav, 'gpu', { get: () => undefined, configurable: true }); } catch(e) {}
+
+    // ── 22. Web APIs Safari iOS không có ─────────────────────────────────
+    try { Object.defineProperty(nav, 'usb',       { get: () => undefined, configurable: true }); } catch(e) {}
+    try { Object.defineProperty(nav, 'bluetooth', { get: () => undefined, configurable: true }); } catch(e) {}
+    try { Object.defineProperty(nav, 'serial',    { get: () => undefined, configurable: true }); } catch(e) {}
+    try { Object.defineProperty(nav, 'hid',       { get: () => undefined, configurable: true }); } catch(e) {}
+    try { Object.defineProperty(nav, 'locks',     { get: () => undefined, configurable: true }); } catch(e) {}
+
+    // ── 23. DeviceMotion / DeviceOrientation — iOS yêu cầu permission ─────
+    try {
+      if (window.DeviceMotionEvent && !window.DeviceMotionEvent.requestPermission) {
+        window.DeviceMotionEvent.requestPermission = function() {
+          return Promise.resolve('granted');
+        };
+      }
+      if (window.DeviceOrientationEvent && !window.DeviceOrientationEvent.requestPermission) {
+        window.DeviceOrientationEvent.requestPermission = function() {
+          return Promise.resolve('granted');
+        };
+      }
+    } catch(e) {}
+
+    // ── 24. Touch events — đảm bảo có mặt cho mobile ─────────────────────
+    try { window.ontouchstart = null; } catch(e) {}
+    try { window.ontouchmove = null; } catch(e) {}
+    try { window.ontouchend = null; } catch(e) {}
+
+    // ── 25. Function.prototype.toString — ẩn các patch ───────────────────
+    Function.prototype.toString = (function(origToString) {
+      const fn = function() {
+        const s = origToString.call(this);
+        if (s.includes('__puppeteer') || s.includes('__playwright') ||
+            s.includes('__webdriver') || s.includes('__fpPatched')) {
+          return 'function () { [native code] }';
+        }
+        return s;
       };
-      try { def(nav, 'connection', conn); } catch(e) {}
-    })();
+      fn.toString = function() { return 'function toString() { [native code] }'; };
+      return fn;
+    })(Function.prototype.toString);
+
+    // ── 26. Eval native string ────────────────────────────────────────────
+    try {
+      window.eval.toString = function() { return 'function eval() { [native code] }'; };
+    } catch(e) {}
 
   } catch(e) {}
 })();

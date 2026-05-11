@@ -79,7 +79,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // reCAPTCHA / blocked page recovery
   int _captchaRetryCount = 0;
-  static const int _maxCaptchaRetries = 3;
+  static const int _maxCaptchaRetries = 5;
 
   // OTP page freeze watchdog (30s sau submit mà trang không chuyển)
   Timer? _otpFreezeTimer;
@@ -568,8 +568,36 @@ class _BrowserScreenState extends State<BrowserScreen> {
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
       );
 
-    // Luôn xóa cookies TRƯỚC khi load để tránh request đầu mang theo cookies cũ
+    // FRESH SESSION:
+    // 1. Xóa cookies qua API (HTTP layer)
     await WebViewCookieManager().clearCookies();
+    if (!mounted) return;
+
+    // 2. Load about:blank trước để có JS context, wipe toàn bộ storage,
+    //    rồi mới navigate sang URL thật → đảm bảo profile mới hoàn toàn
+    try {
+      await _controller.loadRequest(Uri.parse('about:blank'));
+      // Đợi about:blank load xong
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+      await _controller.runJavaScript('''
+try{localStorage.clear();}catch(e){}
+try{sessionStorage.clear();}catch(e){}
+try{
+  if(indexedDB && indexedDB.databases){
+    indexedDB.databases().then(function(dbs){
+      dbs.forEach(function(db){try{indexedDB.deleteDatabase(db.name);}catch(e){}});
+    });
+  }
+}catch(e){}
+try{
+  if(window.caches && caches.keys){
+    caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k);});});
+  }
+}catch(e){}
+''');
+      await Future.delayed(const Duration(milliseconds: 100));
+    } catch (_) {}
     if (!mounted) return;
 
     await _controller.loadRequest(Uri.parse(startUrl));
