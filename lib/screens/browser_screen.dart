@@ -67,6 +67,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   // Đã vượt qua trang OTP ít nhất 1 lần → cho phép captcha recovery sau OTP
   bool _passedOtpPage = false;
 
+  // Sau システムエラー hậu OTP → navigate đến startUrl rồi check có phải login page không
+  bool _checkLoginAfterOtpError = false;
+
   // Lottery result extraction (lotteryResult mode)
   bool _resultChecked = false;
   bool _pendingResultNavigation = false;
@@ -222,19 +225,33 @@ class _BrowserScreenState extends State<BrowserScreen> {
     return;
   }
 
-  // Bỏ qua keyword check nếu đang ở trang login (form email hiện diện)
   var loginForm = document.querySelector('input[type="email"], input[name="loginEmail"], input[name="email"]');
-  if (loginForm && loginForm.offsetParent !== null) return;
+  var onLoginPage = loginForm && loginForm.offsetParent !== null;
+  var text = document.body ? document.body.innerText : '';
 
-  // Error messages đặc trưng (chỉ check trên trang KHÔNG phải login/OTP)
+  // CRITICAL keywords — luôn check kể cả trên login page
+  // (reCAPTCHA/bot detection messages — không thể là lỗi login bình thường)
+  var criticalKws = [
+    'reCAPTCHA 認証失敗','reCAPTCHA認証','reCAPTCHAの認証',
+    '認証に失敗','認証失敗しました',
+    'ロボットではありません','アクセスが一時的に制限',
+  ];
+  for (var k = 0; k < criticalKws.length; k++) {
+    if (text.indexOf(criticalKws[k]) >= 0) {
+      window.FlutterChannel.postMessage(JSON.stringify({type:'captchaError',reason:criticalKws[k]}));
+      return;
+    }
+  }
+
+  // Trang login → skip generic error keywords (có thể là lỗi login bình thường)
+  if (onLoginPage) return;
+
+  // Generic error messages (chỉ check ngoài trang login/OTP)
   var kws = [
-    'reCAPTCHA 認証失敗','reCAPTCHA認証','認証に失敗','認証失敗しました',
     'エラーが発生しました','エラー発生しました','システムエラー',
-    'アクセスが一時的に制限','ロボットではありません',
     'ただいまメンテナンス','しばらくしてから',
     'しばらく時間','お時間をおいて','ご不便をおかけ',
   ];
-  var text = document.body ? document.body.innerText : '';
   for (var j = 0; j < kws.length; j++) {
     if (text.indexOf(kws[j]) >= 0) {
       window.FlutterChannel.postMessage(JSON.stringify({type:'captchaError',reason:kws[j]}));
@@ -466,6 +483,20 @@ class _BrowserScreenState extends State<BrowserScreen> {
               _currentUrl = url;
               _loading = false;
             });
+
+            // Sau システムエラー hậu OTP: navigate đến startUrl xong → check
+            // Case A: KHÔNG phải login page (session còn) → để flow tiếp tục
+            // Case B: LÀ login page → trigger full recover (clear+5G+reload+autofill)
+            if (_checkLoginAfterOtpError) {
+              setState(() => _checkLoginAfterOtpError = false);
+              if (_isLoginPage(url)) {
+                _setStatus('🔁 Session mất — full recover...');
+                unawaited(_recoverAndRetry());
+                return;
+              }
+              // Case A: session OK → fall through để các flow lottery/orderStatus tự xử lý
+            }
+
             _controller.canGoBack().then((v) => setState(() => _canGoBack = v));
             _controller.canGoForward().then(
               (v) => setState(() => _canGoForward = v),
@@ -587,40 +618,94 @@ class _BrowserScreenState extends State<BrowserScreen> {
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
       );
 
-    // FRESH SESSION:
-    // 1. Xóa cookies qua API (HTTP layer)
-    await WebViewCookieManager().clearCookies();
-    if (!mounted) return;
-
-    // 2. Load about:blank trước để có JS context, wipe toàn bộ storage,
-    //    rồi mới navigate sang URL thật → đảm bảo profile mới hoàn toàn
-    try {
-      await _controller.loadRequest(Uri.parse('about:blank'));
-      // Đợi about:blank load xong
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      await _controller.runJavaScript('''
-try{localStorage.clear();}catch(e){}
-try{sessionStorage.clear();}catch(e){}
-try{
-  if(indexedDB && indexedDB.databases){
-    indexedDB.databases().then(function(dbs){
-      dbs.forEach(function(db){try{indexedDB.deleteDatabase(db.name);}catch(e){}});
-    });
-  }
-}catch(e){}
-try{
-  if(window.caches && caches.keys){
-    caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k);});});
-  }
-}catch(e){}
-''');
-      await Future.delayed(const Duration(milliseconds: 100));
-    } catch (_) {}
+    // FRESH SESSION — clear toàn bộ và verify
+    await _wipeAllSessionData(showStatus: true);
     if (!mounted) return;
 
     await _controller.loadRequest(Uri.parse(startUrl));
     if (mounted) setState(() => _currentUrl = startUrl);
+  }
+
+  /// Xóa SẠCH cookies + localStorage + sessionStorage + IndexedDB + CacheStorage
+  /// + Service Workers. Có verify từng bước và hiển thị status để user biết.
+  Future<void> _wipeAllSessionData({bool showStatus = true}) async {
+    if (showStatus) _setStatus('🧹 Đang xóa cookies + storage + cache...');
+
+    // 1. Cookies qua API (HTTP layer)
+    try { await WebViewCookieManager().clearCookies(); } catch (_) {}
+    if (!mounted) return;
+
+    // 2. Load about:blank để có JS context riêng
+    try {
+      await _controller.loadRequest(Uri.parse('about:blank'));
+      await Future.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+    } catch (_) {}
+
+    // 3. Wipe storage + verify
+    try {
+      final res = await _controller.runJavaScriptReturningResult('''
+(function(){
+  var before = {ls: 0, ss: 0, idb: 0, cs: 0, sw: 0};
+  var after  = {ls: 0, ss: 0, idb: 0, cs: 0, sw: 0};
+  try { before.ls = localStorage.length; localStorage.clear(); after.ls = localStorage.length; } catch(e){}
+  try { before.ss = sessionStorage.length; sessionStorage.clear(); after.ss = sessionStorage.length; } catch(e){}
+  // IndexedDB
+  try {
+    if (indexedDB && indexedDB.databases) {
+      indexedDB.databases().then(function(dbs){
+        before.idb = dbs.length;
+        dbs.forEach(function(db){try{indexedDB.deleteDatabase(db.name);}catch(e){}});
+      });
+    }
+  } catch(e){}
+  // CacheStorage
+  try {
+    if (window.caches && caches.keys) {
+      caches.keys().then(function(ks){
+        before.cs = ks.length;
+        ks.forEach(function(k){caches.delete(k);});
+      });
+    }
+  } catch(e){}
+  // Service Workers
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      navigator.serviceWorker.getRegistrations().then(function(regs){
+        before.sw = regs.length;
+        regs.forEach(function(r){try{r.unregister();}catch(e){}});
+      });
+    }
+  } catch(e){}
+  return JSON.stringify(before);
+})()
+''');
+      // Result có thể là string JSON với escape, parse cẩn thận
+      var raw = res.toString();
+      if (raw.startsWith('"') && raw.endsWith('"')) {
+        raw = raw.substring(1, raw.length - 1).replaceAll(r'\"', '"');
+      }
+      try {
+        final stats = jsonDecode(raw) as Map<String, dynamic>;
+        final ls = stats['ls'] ?? 0;
+        final ss = stats['ss'] ?? 0;
+        final idb = stats['idb'] ?? 0;
+        final cs = stats['cs'] ?? 0;
+        final sw = stats['sw'] ?? 0;
+        if (showStatus) {
+          _setStatus(
+            '✅ Đã xóa: cookies + LS:$ls + SS:$ss + IDB:$idb + Cache:$cs + SW:$sw',
+          );
+        }
+      } catch (_) {
+        if (showStatus) _setStatus('✅ Đã xóa cookies + storage + cache');
+      }
+      // Đợi 1.5s để user kịp đọc
+      await Future.delayed(const Duration(milliseconds: 1500));
+    } catch (_) {
+      if (showStatus) _setStatus('⚠️ Clear một phần — tiếp tục anyway');
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
   }
 
   void _handleJsMessage(String message) {
@@ -1110,24 +1195,13 @@ try{
     final p = context.read<AppProvider>();
     _setStatus('🛡️ reCAPTCHA detected — reset lần $_captchaRetryCount/$_maxCaptchaRetries...');
 
-    // Chờ 2s để trang hiển thị lỗi xong trước khi reset
-    await Future.delayed(const Duration(seconds: 2));
+    // Chờ 3s để trang hiển thị lỗi xong trước khi reset (user-requested)
+    await Future.delayed(const Duration(seconds: 3));
     if (!mounted) return;
 
-    // 1. Xóa cookies + toàn bộ storage (localStorage, sessionStorage, IndexedDB)
-    await WebViewCookieManager().clearCookies();
-    await _controller.runJavaScript('''
-try{localStorage.clear();}catch(e){}
-try{sessionStorage.clear();}catch(e){}
-try{
-  if(indexedDB && indexedDB.databases){
-    indexedDB.databases().then(function(dbs){
-      dbs.forEach(function(db){try{indexedDB.deleteDatabase(db.name);}catch(e){}});
-    });
-  }
-}catch(e){}
-window.__fpPatched=false;
-''');
+    // 1. Xóa SẠCH tất cả + verify + hiển thị status
+    await _wipeAllSessionData(showStatus: true);
+    if (!mounted) return;
 
     // 2. Đổi sang device profile mới (đảm bảo KHÁC profile cũ) + apply UA
     final newProfile = randomProfile(except: _profile);
@@ -1157,15 +1231,18 @@ window.__fpPatched=false;
     await Future.delayed(Duration(milliseconds: extraMs));
     if (!mounted) return;
 
-    // 5. Reload trang login
+    // 5. Reload URL ban đầu (startUrl) — không phải luôn loginUrl
     _setStatus('🔃 Login lại...');
-    await _controller.loadRequest(Uri.parse(p.loginUrl));
+    final target = widget.startUrl ?? p.loginUrl;
+    await _controller.loadRequest(Uri.parse(target));
   }
 
-  /// Relogin nhẹ sau khi trang hậu OTP có エラーが発生しました — không clear cookie / đổi UA
+  /// Sau システムエラー hậu OTP — đợi 2s, navigate đến startUrl, rồi check:
+  /// - Nếu KHÔNG về trang login (session OK) → để flow tiếp tục bình thường
+  /// - Nếu VỀ trang login → trigger full recover (clear+5G+reload+autofill)
   Future<void> _reloginAfterOtpError() async {
     if (!mounted) return;
-    _setStatus('⚠️ Lỗi sau OTP — đăng nhập lại sau 2s...');
+    _setStatus('⚠️ システムエラー sau OTP — chờ 2s rồi check lại...');
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;
     final p = context.read<AppProvider>();
@@ -1175,9 +1252,11 @@ window.__fpPatched=false;
       _lastOtpPageUrl = null;
       _otpAutoSubmitting = false;
       _passedOtpPage = false;
+      _checkLoginAfterOtpError = true;
     });
-    _setStatus('🔃 Đăng nhập lại...');
-    await _controller.loadRequest(Uri.parse(p.loginUrl));
+    _setStatus('🔃 Đi đến URL ban đầu...');
+    final target = widget.startUrl ?? p.loginUrl;
+    await _controller.loadRequest(Uri.parse(target));
   }
 
   /// Skip account hiện tại: nếu đang chạy all thì gọi callback, không thì đóng browser
@@ -1495,14 +1574,21 @@ window.__fpPatched=false;
             ),
         ],
       ),
-      body: Stack(
+      body: Column(
         children: [
-          WebViewWidget(controller: _controller),
-          if (_loading)
-            const LinearProgressIndicator(
-              backgroundColor: AppColors.surfaceVariant,
-              valueColor: AlwaysStoppedAnimation(AppColors.primary),
+          _buildProgressBanner(),
+          Expanded(
+            child: Stack(
+              children: [
+                WebViewWidget(controller: _controller),
+                if (_loading)
+                  const LinearProgressIndicator(
+                    backgroundColor: AppColors.surfaceVariant,
+                    valueColor: AlwaysStoppedAnimation(AppColors.primary),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
       bottomNavigationBar: Container(
@@ -1655,6 +1741,138 @@ window.__fpPatched=false;
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Banner thống kê realtime cho lotteryResult / orderStatus mode
+  Widget _buildProgressBanner() {
+    final mode = widget.account.mode;
+    if (mode != AccountMode.lotteryResult && mode != AccountMode.orderStatus) {
+      return const SizedBox.shrink();
+    }
+    return Consumer<AppProvider>(
+      builder: (ctx, p, _) {
+        if (mode == AccountMode.lotteryResult) {
+          return _lotteryBanner(p.lotteryResults);
+        }
+        return _orderStatusBanner(p.orderStatusResults);
+      },
+    );
+  }
+
+  Widget _lotteryBanner(List<LotteryResultEntry> rows) {
+    final won = rows.where((r) => r.isWon).length;
+    final lost = rows.where((r) => r.isLost).length;
+    final err = rows.where((r) => r.isError).length;
+    final noResult = rows.where((r) => r.result == '対象なし' || r.result == '結果なし').length;
+    final pending = rows.where((r) => r.result == '未定').length;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceVariant,
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            const Text('🎯',
+                style: TextStyle(fontSize: 13)),
+            const SizedBox(width: 4),
+            Text(
+              '${rows.length}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(width: 8),
+            _bannerChip('当選', won, AppColors.done),
+            _bannerChip('落選', lost, AppColors.error),
+            if (pending > 0) _bannerChip('未定', pending, AppColors.secondary),
+            if (err > 0) _bannerChip('エラー', err, AppColors.warning),
+            if (noResult > 0) _bannerChip('対象なし', noResult, AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _orderStatusBanner(List<OrderStatusEntry> rows) {
+    final received = rows.where((e) => e.isReceived).length;
+    final preparing = rows.where((e) => e.isPreparing).length;
+    final shipped = rows.where((e) => e.isShipped).length;
+    final cancelled = rows.where((e) => e.isCancelled).length;
+    final err = rows.where((e) => e.status == 'エラー').length;
+    final noResult = rows.where((e) => e.status == '対象なし').length;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceVariant,
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            const Text('📦',
+                style: TextStyle(fontSize: 13)),
+            const SizedBox(width: 4),
+            Text(
+              '${rows.length}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(width: 8),
+            _bannerChip('受付', received, AppColors.primary),
+            _bannerChip('準備中', preparing, AppColors.secondary),
+            _bannerChip('発送済', shipped, AppColors.done),
+            if (cancelled > 0) _bannerChip('キャンセル', cancelled, Colors.grey),
+            if (err > 0) _bannerChip('エラー', err, AppColors.warning),
+            if (noResult > 0) _bannerChip('対象なし', noResult, AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bannerChip(String label, int count, Color color) {
+    return Container(
+      margin: const EdgeInsets.only(right: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withAlpha(30),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withAlpha(100)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 3),
+          Text(
+            '$count',
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }
