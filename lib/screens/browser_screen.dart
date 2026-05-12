@@ -649,14 +649,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
     await _wipeAllSessionData(showStatus: true);
     if (!mounted) return;
 
-    // Đổi 5G trước load đầu tiên — tránh dùng IP đã bị burn từ session trước
-    if (p.shortcut5gEnabled) {
-      _setStatus('⚡ Đổi 5G...');
-      await ShortcutService.triggerShortcut('5G');
-      await Future.delayed(const Duration(seconds: 2));
-    }
-    if (!mounted) return;
-
     await _controller.loadRequest(Uri.parse(startUrl));
     if (mounted) setState(() => _currentUrl = startUrl);
   }
