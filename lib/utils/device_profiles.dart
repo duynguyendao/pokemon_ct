@@ -186,6 +186,64 @@ const List<_BaseDevice> _baseDevices = [
     screenWidth: 414, screenHeight: 896, memory: 4,
     iosVersions: ['17.4.1', '17.3', '16.7.10'],
   ),
+  // iPhone XS/XR/X series (iOS 16 max)
+  _BaseDevice(
+    name: 'iPhone XS Max',
+    screenWidth: 414, screenHeight: 896, memory: 4,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  _BaseDevice(
+    name: 'iPhone XS',
+    screenWidth: 375, screenHeight: 812, memory: 4,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  _BaseDevice(
+    name: 'iPhone XR',
+    screenWidth: 414, screenHeight: 896, memory: 3,
+    devicePixelRatio: 2.0,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  _BaseDevice(
+    name: 'iPhone X',
+    screenWidth: 375, screenHeight: 812, memory: 3,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  // iPhone 8 series (iOS 16 max)
+  _BaseDevice(
+    name: 'iPhone 8 Plus',
+    screenWidth: 414, screenHeight: 736, memory: 3,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 8',
+    screenWidth: 375, screenHeight: 667, memory: 2,
+    devicePixelRatio: 2.0,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  // iPhone 7 series (iOS 15 max)
+  _BaseDevice(
+    name: 'iPhone 7 Plus',
+    screenWidth: 414, screenHeight: 736, memory: 3,
+    iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 7',
+    screenWidth: 375, screenHeight: 667, memory: 2,
+    devicePixelRatio: 2.0,
+    iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
+  ),
+  // iPhone 6s series (iOS 15 max)
+  _BaseDevice(
+    name: 'iPhone 6s Plus',
+    screenWidth: 414, screenHeight: 736, memory: 2,
+    iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
+  ),
+  _BaseDevice(
+    name: 'iPhone 6s',
+    screenWidth: 375, screenHeight: 667, memory: 2,
+    devicePixelRatio: 2.0,
+    iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
+  ),
   // iPhone SE (DPR = 2.0, không phải 3.0 như các iPhone khác)
   _BaseDevice(
     name: 'iPhone SE (3rd gen)',
@@ -198,6 +256,12 @@ const List<_BaseDevice> _baseDevices = [
     screenWidth: 375, screenHeight: 667, memory: 3,
     devicePixelRatio: 2.0,
     iosVersions: ['17.4', '16.7.10', '16.7.8'],
+  ),
+  _BaseDevice(
+    name: 'iPhone SE (1st gen)',
+    screenWidth: 320, screenHeight: 568, memory: 2,
+    devicePixelRatio: 2.0,
+    iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
   ),
   // ─── iPad (cùng WebKit engine, an toàn) ────────────────────────────────
   // Tất cả iPad: DPR = 2.0, maxTouchPoints = 5
@@ -260,6 +324,100 @@ const List<_BaseDevice> _baseDevices = [
     screenWidth: 744, screenHeight: 1133, memory: 4,
     hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
     iosVersions: ['18.1', '17.6', '17.4', '16.7.10'],
+  ),
+  // iPad Pro M1 (2021) — supports iOS 18
+  _BaseDevice(
+    name: 'iPad Pro 12.9" M1',
+    screenWidth: 1024, screenHeight: 1366, memory: 8,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.2', '17.6.1', '17.4', '16.7.10'],
+  ),
+  _BaseDevice(
+    name: 'iPad Pro 11" M1',
+    screenWidth: 834, screenHeight: 1194, memory: 8,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.2', '17.6', '17.4', '16.7.10'],
+  ),
+  // iPad Air 4 (A14 Bionic, 2020) — supports iOS 14-18
+  _BaseDevice(
+    name: 'iPad Air 4',
+    screenWidth: 820, screenHeight: 1180, memory: 4,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['18.1', '17.6.1', '17.4', '16.7.10'],
+  ),
+  // iPad 9th gen (A13 Bionic, 2021) — max iOS 17
+  _BaseDevice(
+    name: 'iPad (9th gen)',
+    screenWidth: 810, screenHeight: 1080, memory: 3,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['17.7.2', '17.6.1', '17.4', '16.7.10'],
+  ),
+  // iPad mini 5 (A12 Bionic, 2019) — max iOS 16
+  _BaseDevice(
+    name: 'iPad mini 5',
+    screenWidth: 768, screenHeight: 1024, memory: 3,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '15.8.3'],
+  ),
+  // iPad Pro A12Z (2020) — max iOS 17
+  _BaseDevice(
+    name: 'iPad Pro 12.9" (4th gen)',
+    screenWidth: 1024, screenHeight: 1366, memory: 6,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['17.6.1', '17.4', '17.2', '16.7.10'],
+  ),
+  _BaseDevice(
+    name: 'iPad Pro 11" (2nd gen)',
+    screenWidth: 834, screenHeight: 1194, memory: 6,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['17.6', '17.4', '17.2', '16.7.10'],
+  ),
+  // iPad Pro A12X (2018) — max iOS 17
+  _BaseDevice(
+    name: 'iPad Pro 12.9" (3rd gen)',
+    screenWidth: 1024, screenHeight: 1366, memory: 4,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['17.6', '17.4', '16.7.10', '16.7.8'],
+  ),
+  _BaseDevice(
+    name: 'iPad Pro 11" (1st gen)',
+    screenWidth: 834, screenHeight: 1194, memory: 4,
+    hwConcurrency: 8, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['17.5', '17.3', '16.7.10', '16.7.8'],
+  ),
+  // iPad Air 3 (A12, 2019) — max iOS 16
+  _BaseDevice(
+    name: 'iPad Air 3',
+    screenWidth: 834, screenHeight: 1112, memory: 3,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  // iPad 8th gen (A12, 2020) — max iOS 17
+  _BaseDevice(
+    name: 'iPad (8th gen)',
+    screenWidth: 810, screenHeight: 1080, memory: 3,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['17.6', '17.4', '16.7.10', '16.7.8'],
+  ),
+  // iPad Pro 10.5" / 12.9" 2nd gen (A10X, 2017) — max iOS 16
+  _BaseDevice(
+    name: 'iPad Pro 10.5"',
+    screenWidth: 834, screenHeight: 1112, memory: 4,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  _BaseDevice(
+    name: 'iPad Pro 12.9" (2nd gen)',
+    screenWidth: 1024, screenHeight: 1366, memory: 4,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
+  ),
+  // iPad 7th gen (A10 Fusion, 2019) — max iOS 16
+  _BaseDevice(
+    name: 'iPad (7th gen)',
+    screenWidth: 810, screenHeight: 1080, memory: 3,
+    hwConcurrency: 6, devicePixelRatio: 2.0, isIPad: true,
+    iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
   ),
 ];
 
