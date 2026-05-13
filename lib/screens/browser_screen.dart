@@ -1033,9 +1033,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
     await _controller.runJavaScript(buildOtpAutoSubmitScript(otp));
 
-    // Watchdog: nếu trang không chuyển sau 30s kể từ khi submit → reload + thử lại
+    // Watchdog: nếu trang không chuyển sau 60s kể từ khi submit → kiểm tra session
     _otpFreezeTimer?.cancel();
-    _otpFreezeTimer = Timer(const Duration(seconds: 30), () {
+    _otpFreezeTimer = Timer(const Duration(seconds: 60), () {
       if (!mounted) return;
       if (_currentUrl == _lastOtpPageUrl) {
         unawaited(_handleOtpFreeze());
@@ -1298,7 +1298,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
-  /// OTP page không phản hồi sau 30s: reload + submit lại OTP cuối cùng
+  /// OTP page không phản hồi sau 60s: navigate đến loginUrl, kiểm tra session
+  /// - Không phải trang login (session còn) → tiếp tục các bước lottery/order
+  /// - Là trang login (session mất) → nhập lại email/password + login
   Future<void> _handleOtpFreeze() async {
     if (!mounted) return;
     _otpFreezeTimer?.cancel();
@@ -1306,40 +1308,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     if (_otpFreezeRetryCount >= _maxOtpFreezeRetries) {
       setState(() => _otpAutoSubmitting = false);
-      _setStatus('❌ Trang OTP đơ $_maxOtpFreezeRetries lần — skip account');
+      _setStatus('❌ OTP đơ $_maxOtpFreezeRetries lần — skip account');
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) _skipCurrentAccount();
       return;
     }
 
     _otpFreezeRetryCount++;
-    final otpUrl = _lastOtpPageUrl;
-    final lastOtp = _lastSubmittedOtp;
+    _setStatus('⏰ OTP không phản hồi 60s — kiểm tra session...');
+    setState(() {
+      _otpAutoSubmitting = false;
+      _checkLoginAfterOtpError = true;
+    });
 
-    if (otpUrl == null || lastOtp == null) {
-      if (mounted) _skipCurrentAccount();
-      return;
-    }
-
-    _setStatus(
-      '🔄 Trang OTP không phản hồi — reload lần $_otpFreezeRetryCount/$_maxOtpFreezeRetries...',
+    await _controller.loadRequest(
+      Uri.parse('https://www.pokemoncenter-online.com/mypage/'),
     );
-    setState(() => _otpAutoSubmitting = false);
-
-    // Reload OTP page — giữ _lastOtpPageUrl == otpUrl để tránh trigger _autoSubmitOtp tự động
-    await _controller.loadRequest(Uri.parse(otpUrl));
-
-    // Chờ OTP input field xuất hiện lại
-    await _waitForElement([
-      'input#authCode',
-      'input[name="dwfrm_factor2Auth_authCode"]',
-      'input[name="passcode"]',
-      'input[maxlength="6"]',
-    ], timeout: 5000);
-
-    if (!mounted) return;
-    // Submit lại mã OTP cuối cùng đã nhận
-    await _doSubmitOtp(lastOtp);
   }
 
   Future<void> _openMailApp() async {
