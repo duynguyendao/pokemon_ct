@@ -807,18 +807,70 @@ String buildAutoFillScript(String email, String password,
   var emailEl = findFirst(['input[type="email"]','input[name="email"]','input[name="loginEmail"]','input[name="username"]','input[id*="email"]','input[placeholder*="メール"]','input[placeholder*="email" i]']);
   var passEl  = findFirst(['input[type="password"]','input[name="password"]','input[name="loginPassword"]','input[id*="pass"]']);
 
-  function done() {
-    window._wk.postMessage('{"type":"typeDone","field":"autofill"}');
+  // Simulate a 2-second human-like scroll at a random position before login
+  function simulateScroll(onDone) {
+    try {
+      var vw  = window.innerWidth  || 375;
+      var vh  = window.innerHeight || 600;
+      var x   = Math.floor(vw * 0.25 + Math.random() * vw * 0.5);
+      var y0  = Math.floor(vh * 0.35 + Math.random() * vh * 0.3);
+      var dir = Math.random() > 0.5 ? -1 : 1;
+      var dist  = 60 + Math.floor(Math.random() * 80);
+      var steps = 10 + Math.floor(Math.random() * 8);
+      var total = 1800 + Math.floor(Math.random() * 500);
+      var delay = Math.floor(total / steps);
+      var tid   = (Date.now() & 0xFFFF) | 1;
+      var step  = 0;
+      var curY  = y0;
+
+      function mkT(cy) {
+        var el = document.elementFromPoint(x, Math.max(0, cy)) || document.body;
+        return new Touch({identifier:tid, target:el,
+          clientX:x, clientY:cy, radiusX:11, radiusY:11, rotationAngle:0, force:0.5});
+      }
+      function fire(type, cy, tList) {
+        var el = document.elementFromPoint(x, Math.max(0, cy)) || document.body;
+        try { el.dispatchEvent(new TouchEvent(type, {
+          bubbles:true, cancelable:true,
+          touches:tList, targetTouches:tList, changedTouches:tList
+        })); } catch(e) {}
+      }
+
+      fire('touchstart', curY, [mkT(curY)]);
+
+      function doMove() {
+        if (step >= steps) {
+          var tf = mkT(curY);
+          fire('touchend', curY, [tf]);
+          setTimeout(onDone, 150 + Math.floor(Math.random() * 350));
+          return;
+        }
+        curY = y0 + dir * Math.round(dist * (step + 1) / steps);
+        fire('touchmove', curY, [mkT(curY)]);
+        window.scrollBy(0, dir * Math.round(dist / steps));
+        step++;
+        setTimeout(doMove, delay + Math.floor(Math.random() * 20) - 10);
+      }
+      setTimeout(doMove, 60 + Math.floor(Math.random() * 40));
+    } catch(e) {
+      onDone();
+    }
+  }
+
+  function afterType() {
+    simulateScroll(function() {
+      window._wk.postMessage('{"type":"typeDone","field":"autofill"}');
+    });
   }
 
   if (emailEl && passEl) {
-    typeChars(emailEl, '$safeEmail', function() { typeChars(passEl, '$safePass', done); });
+    typeChars(emailEl, '$safeEmail', function() { typeChars(passEl, '$safePass', afterType); });
   } else if (emailEl) {
-    typeChars(emailEl, '$safeEmail', done);
+    typeChars(emailEl, '$safeEmail', afterType);
   } else if (passEl) {
-    typeChars(passEl, '$safePass', done);
+    typeChars(passEl, '$safePass', afterType);
   } else {
-    done();
+    window._wk.postMessage('{"type":"typeDone","field":"autofill"}');
   }
 })();
 ''';
