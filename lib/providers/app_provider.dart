@@ -172,6 +172,17 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> batchSetStatus(List<String> ids, String status) async {
+    for (final id in ids) {
+      final idx = _accounts.indexWhere((a) => a.id == id);
+      if (idx >= 0) {
+        _accounts[idx] = _accounts[idx].copyWith(status: status);
+      }
+    }
+    await _storage.saveAccounts(_accounts);
+    notifyListeners();
+  }
+
   List<Account> parseAccountsText(String text, {String? group}) {
     final lines = text.trim().split('\n');
     final result = <Account>[];

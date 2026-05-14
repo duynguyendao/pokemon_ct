@@ -783,6 +783,30 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       }
     } catch(e) {}
 
+    // ── 29. navigator.webdriver = false ───────────────────────────────────
+    try {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: function() { return false; },
+        enumerable: true, configurable: true
+      });
+    } catch(e) {}
+
+    // ── 30. navigator.permissions.query — WKWebView may return 'denied'
+    //        for permissions Safari returns 'prompt'; patch to 'prompt'. ──
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        var _origQuery = navigator.permissions.query.bind(navigator.permissions);
+        navigator.permissions.query = function(params) {
+          var name = params && params.name;
+          if (name === 'geolocation' || name === 'camera' || name === 'microphone' ||
+              name === 'notifications' || name === 'push') {
+            return Promise.resolve({ state: 'prompt', onchange: null });
+          }
+          return _origQuery(params);
+        };
+      }
+    } catch(e) {}
+
   } catch(e) {}
 })();
 ''';

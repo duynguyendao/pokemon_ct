@@ -280,6 +280,19 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
       );
+
+      // Auto-mark done for task-completion modes (lotteryResult / orderStatus)
+      if (mounted &&
+          (account.mode == AccountMode.lotteryResult ||
+              account.mode == AccountMode.orderStatus)) {
+        final current = p.accounts.firstWhere(
+          (a) => a.id == account.id,
+          orElse: () => account,
+        );
+        if (current.status == 'todo') {
+          await p.toggleStatus(account.id);
+        }
+      }
     }
   }
 
@@ -982,6 +995,32 @@ class _HomeScreenState extends State<HomeScreen>
                 color: AppColors.textSecondary,
                 fontSize: 14,
               ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.check_circle_outline, color: AppColors.done),
+              tooltip: 'Đánh dấu Xong',
+              onPressed: _selected.isEmpty
+                  ? null
+                  : () async {
+                      await p.batchSetStatus(_selected.toList(), 'done');
+                      setState(() {
+                        _selected.clear();
+                        _batchMode = false;
+                      });
+                    },
+            ),
+            IconButton(
+              icon: const Icon(Icons.radio_button_unchecked, color: AppColors.todo),
+              tooltip: 'Đánh dấu Chờ',
+              onPressed: _selected.isEmpty
+                  ? null
+                  : () async {
+                      await p.batchSetStatus(_selected.toList(), 'todo');
+                      setState(() {
+                        _selected.clear();
+                        _batchMode = false;
+                      });
+                    },
             ),
             IconButton(
               icon: const Icon(Icons.drive_file_move_outlined),

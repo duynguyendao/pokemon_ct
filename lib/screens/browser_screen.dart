@@ -86,6 +86,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   // reCAPTCHA / blocked page recovery
   int _captchaRetryCount = 0;
   static const int _maxCaptchaRetries = 5;
+  int _captchaCount = 0; // cumulative count (never resets) — shown in toolbar
+
+  // Elapsed time since browser opened
+  Timer? _elapsedTimer;
+  int _elapsedSeconds = 0;
 
   // OTP page freeze watchdog (30s sau submit mà trang không chuyển)
   Timer? _otpFreezeTimer;
@@ -274,6 +279,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void initState() {
     super.initState();
     _profile = randomProfile();
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _elapsedSeconds++);
+    });
     final p = context.read<AppProvider>();
     final startUrl = widget.startUrl ?? p.loginUrl;
     unawaited(_initController(startUrl, incognito: p.incognitoMode));
@@ -306,6 +314,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
       );
     });
   }
+
+  String _formatElapsed(int s) =>
+      '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 
   /// Extracts a short browser label from a full UA string.
   String _shortUaLabel(String ua) {
@@ -416,6 +427,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   @override
   void dispose() {
+    _elapsedTimer?.cancel();
     _statusOverlay?.remove();
     _statusOverlay = null;
     _otpFreezeTimer?.cancel();
@@ -1239,6 +1251,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _pageFreezeTimer?.cancel();
     _pageFreezeTimer = null;
     _captchaRetryCount++;
+    _captchaCount++;
     // Capture context-dependent values trước await
     final p = context.read<AppProvider>();
     _setStatus('🛡️ reCAPTCHA detected — reset lần $_captchaRetryCount/$_maxCaptchaRetries...');
@@ -1548,6 +1561,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   _shortUaLabel(_profile.userAgent),
                   style: const TextStyle(fontSize: 10, color: AppColors.secondary),
                   overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                if (_captchaCount > 0) ...[
+                  Text(
+                    '⚠️ $_captchaCount',
+                    style: const TextStyle(fontSize: 10, color: AppColors.warning),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Text(
+                  '⏱ ${_formatElapsed(_elapsedSeconds)}',
+                  style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
                 ),
               ],
             ),
