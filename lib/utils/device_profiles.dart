@@ -50,7 +50,6 @@ class _BaseDevice {
   final int memory;
   final int hwConcurrency;
   final double devicePixelRatio;
-  final bool isIPad;
   final List<String> iosVersions;
   const _BaseDevice({
     required this.name,
@@ -59,7 +58,6 @@ class _BaseDevice {
     required this.memory,
     this.hwConcurrency = 4,
     this.devicePixelRatio = 3.0,
-    this.isIPad = false,
     required this.iosVersions,
   });
 }
@@ -274,15 +272,11 @@ List<DeviceProfile> _generateProfiles() {
   for (final dev in _baseDevices) {
     for (final ios in dev.iosVersions) {
       final iosUnder = ios.replaceAll('.', '_');
-      // iPad UA: "iPad; CPU OS ..." (không có "iPhone")
-      // iPhone UA: "iPhone; CPU iPhone OS ..."
-      final deviceTag = dev.isIPad ? 'iPad' : 'iPhone';
-      final cpuTag = dev.isIPad ? 'CPU OS' : 'CPU iPhone OS';
       result.add(DeviceProfile(
         name: '${dev.name} · iOS $ios',
         userAgent:
-            'Mozilla/5.0 ($deviceTag; $cpuTag $iosUnder like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/$ios Mobile/15E148 Safari/604.1',
-        platform: dev.isIPad ? 'iPad' : 'iPhone',
+            'Mozilla/5.0 (iPhone; CPU iPhone OS $iosUnder like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/$ios Mobile/15E148 Safari/604.1',
+        platform: 'iPhone',
         vendor: 'Apple Computer, Inc.',
         languages: const ['ja-JP', 'ja', 'en-US'],
         hardwareConcurrency: dev.hwConcurrency,
