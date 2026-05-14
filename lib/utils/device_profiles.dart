@@ -741,10 +741,44 @@ String buildAntiFingerprintScript(DeviceProfile p) {
     } catch(e) {}
 
     // ── 27. Hide _wk JS channel from property enumeration ────────────────
+    // ── 27. Fix _wk + hide webkit.messageHandlers (WKWebView fingerprint) ──
+    // webkit.messageHandlers が存在すると WKWebView と即バレ。
+    // Flutter proxy (window._wk) が webkit.messageHandlers チェーンを使うので
+    // まずネイティブハンドラへの直接参照を保存してから隠す。
     try {
-      if (window._wk) {
+      var _mh = window.webkit && window.webkit.messageHandlers;
+      if (_mh && _mh._wk) {
+        var _nh = _mh._wk;
+        Object.defineProperty(window, '_wk', {
+          value: _nh, enumerable: false, configurable: true, writable: false
+        });
+        try {
+          Object.defineProperty(window.webkit, 'messageHandlers', {
+            value: undefined, enumerable: false, configurable: true
+          });
+        } catch(e) {
+          try {
+            Object.defineProperty(window, 'webkit', {
+              value: Object.create(null), enumerable: false, configurable: true, writable: true
+            });
+          } catch(e2) {}
+        }
+      } else if (window._wk) {
         Object.defineProperty(window, '_wk', {
           value: window._wk, enumerable: false, configurable: true, writable: false
+        });
+      }
+    } catch(e) {}
+
+    // ── 28. window.safari (Safari.app has it; WKWebView does not) ─────────
+    try {
+      if (!window.safari) {
+        Object.defineProperty(window, 'safari', {
+          value: {pushNotification:{
+            permission: function() { return {permission:'default'}; },
+            requestPermission: function() {}
+          }},
+          enumerable: false, configurable: true
         });
       }
     } catch(e) {}

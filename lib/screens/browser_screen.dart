@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 import '../models/account.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
@@ -98,6 +99,45 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // Overlay for status text (above iOS platform WebView)
   OverlayEntry? _statusOverlay;
+
+  // Injected at document-start (before ANY page script including reCAPTCHA).
+  // Hides window.webkit.messageHandlers (clearest WKWebView signal) and adds
+  // window.safari (present in real Safari.app, absent in WKWebView).
+  static const String _earlyAntiBotJs = '''
+(function(){
+  try {
+    var mh = window.webkit && window.webkit.messageHandlers;
+    if (mh && mh._wk) {
+      var nh = mh._wk;
+      Object.defineProperty(window, '_wk', {
+        value: nh, enumerable: false, configurable: true, writable: false
+      });
+      try {
+        Object.defineProperty(window.webkit, 'messageHandlers', {
+          value: undefined, enumerable: false, configurable: true
+        });
+      } catch(e) {
+        try {
+          Object.defineProperty(window, 'webkit', {
+            value: Object.create(null), enumerable: false, configurable: true, writable: true
+          });
+        } catch(e2) {}
+      }
+    }
+  } catch(e) {}
+  try {
+    if (!window.safari) {
+      Object.defineProperty(window, 'safari', {
+        value: {pushNotification:{
+          permission: function() { return {permission:'default'}; },
+          requestPermission: function() {}
+        }},
+        enumerable: false, configurable: true
+      });
+    }
+  } catch(e) {}
+})();
+''';
 
   // JS để phát hiện field OTP và lỗi trên trang
   static const String _detectOtpFieldJs = '''
@@ -647,6 +687,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
         '_wk',
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
       );
+
+    // iOS: inject anti-bot script at document start — runs BEFORE any page JS
+    // (addJavaScriptChannel already added Flutter's _wk proxy user-script, so
+    //  our script runs after it and can save + replace the native handler ref)
+    try {
+      final wk = _controller.platform as WebKitWebViewController;
+      await wk.addUserScript(const WKUserScript(
+        source: _earlyAntiBotJs,
+        injectionTime: WKUserScriptInjectionTime.atDocumentStart,
+        isMainFrameOnly: true,
+      ));
+    } catch (_) {}
 
     // FRESH SESSION — clear toàn bộ và verify
     await _wipeAllSessionData(showStatus: true);
