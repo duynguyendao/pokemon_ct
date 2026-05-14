@@ -111,7 +111,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   ];
   for (var i = 0; i < selectors.length; i++) {
     if (document.querySelector(selectors[i])) {
-      window.FlutterChannel.postMessage('{"type":"otpField","detected":true}');
+      window._wk.postMessage('{"type":"otpField","detected":true}');
       break;
     }
   }
@@ -124,7 +124,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   var bodyText = document.body ? document.body.innerText : '';
   for (var j = 0; j < errorWords.length; j++) {
     if (bodyText.indexOf(errorWords[j]) >= 0) {
-      window.FlutterChannel.postMessage('{"type":"otpError","detected":true}');
+      window._wk.postMessage('{"type":"otpError","detected":true}');
       break;
     }
   }
@@ -136,7 +136,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   var items = [];
   var lis = document.querySelectorAll('.comOrderList > li');
   if (lis.length === 0) {
-    window.FlutterChannel.postMessage(JSON.stringify({type:'lotteryResults',data:[]}));
+    window._wk.postMessage(JSON.stringify({type:'lotteryResults',data:[]}));
     return;
   }
   lis.forEach(function(li) {
@@ -154,7 +154,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       result: won ? '当選' : (lost ? '落選' : '未定'),
     });
   });
-  window.FlutterChannel.postMessage(JSON.stringify({type:'lotteryResults',data:items}));
+  window._wk.postMessage(JSON.stringify({type:'lotteryResults',data:items}));
 })();
 ''';
 
@@ -162,7 +162,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 (function() {
   var orders = document.querySelectorAll('.comOrderList > li');
   if (orders.length === 0) {
-    window.FlutterChannel.postMessage(JSON.stringify({type:'orderStatusResult',data:[]}));
+    window._wk.postMessage(JSON.stringify({type:'orderStatusResult',data:[]}));
     return;
   }
   var result = [];
@@ -195,7 +195,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       time: timeEl ? timeEl.textContent.trim() : ''
     });
   });
-  window.FlutterChannel.postMessage(JSON.stringify({type:'orderStatusResult',data:result}));
+  window._wk.postMessage(JSON.stringify({type:'orderStatusResult',data:result}));
 })();
 ''';
 
@@ -221,14 +221,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
     var r = f.getBoundingClientRect();
     // Challenge dialog kích thước lớn (>= 250px cả 2 chiều). Badge chỉ ~60×60 hoặc 256×60
     if (r.width >= 250 && r.height >= 250) {
-      window.FlutterChannel.postMessage('{"type":"captchaError","reason":"challenge-dialog"}');
+      window._wk.postMessage('{"type":"captchaError","reason":"challenge-dialog"}');
       return;
     }
   }
   // Challenge UI elements (puzzle, image select, audio)
   var chUI = document.querySelector('.rc-imageselect, .rc-audiochallenge, .recaptcha-checkbox-checked, .hcaptcha-checkbox-checked');
   if (chUI && chUI.offsetParent !== null) {
-    window.FlutterChannel.postMessage('{"type":"captchaError","reason":"challenge-ui"}');
+    window._wk.postMessage('{"type":"captchaError","reason":"challenge-ui"}');
     return;
   }
 
@@ -247,7 +247,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   ];
   for (var k = 0; k < criticalKws.length; k++) {
     if (text.indexOf(criticalKws[k]) >= 0) {
-      window.FlutterChannel.postMessage(JSON.stringify({type:'captchaError',reason:criticalKws[k]}));
+      window._wk.postMessage(JSON.stringify({type:'captchaError',reason:criticalKws[k]}));
       return;
     }
   }
@@ -263,7 +263,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   ];
   for (var j = 0; j < kws.length; j++) {
     if (text.indexOf(kws[j]) >= 0) {
-      window.FlutterChannel.postMessage(JSON.stringify({type:'captchaError',reason:kws[j]}));
+      window._wk.postMessage(JSON.stringify({type:'captchaError',reason:kws[j]}));
       return;
     }
   }
@@ -371,7 +371,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   // Polls JS until one of [selectors] is found in DOM, or [timeout] ms passes.
-  // Uses FlutterChannel with key "__domWait_<token>" to resolve.
+  // Uses _wk channel with key "__domWait_<token>" to resolve.
   Future<void> _waitForElement(
     List<String> selectors, {
     int timeout = 3000,
@@ -392,7 +392,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   function check() {
     for (var i = 0; i < selectors.length; i++) {
       if (document.querySelector(selectors[i])) {
-        window.FlutterChannel.postMessage('{"type":"domReady","token":"' + token + '"}');
+        window._wk.postMessage('{"type":"domReady","token":"' + token + '"}');
         return;
       }
     }
@@ -400,7 +400,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (elapsed < maxMs) {
       setTimeout(check, interval);
     } else {
-      window.FlutterChannel.postMessage('{"type":"domReady","token":"' + token + '"}');
+      window._wk.postMessage('{"type":"domReady","token":"' + token + '"}');
     }
   }
   check();
@@ -644,7 +644,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         ),
       )
       ..addJavaScriptChannel(
-        'FlutterChannel',
+        '_wk',
         onMessageReceived: (msg) => _handleJsMessage(msg.message),
       );
 

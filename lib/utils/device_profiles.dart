@@ -57,7 +57,7 @@ class _BaseDevice {
     required this.screenWidth,
     required this.screenHeight,
     required this.memory,
-    this.hwConcurrency = 6,
+    this.hwConcurrency = 4,
     this.devicePixelRatio = 3.0,
     this.isIPad = false,
     required this.iosVersions,
@@ -206,42 +206,46 @@ const List<_BaseDevice> _baseDevices = [
   _BaseDevice(
     name: 'iPhone X',
     screenWidth: 375, screenHeight: 812, memory: 3,
+    hwConcurrency: 2,
     iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
   ),
   // iPhone 8 series (iOS 16 max)
   _BaseDevice(
     name: 'iPhone 8 Plus',
     screenWidth: 414, screenHeight: 736, memory: 3,
+    hwConcurrency: 2,
     iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
   ),
   _BaseDevice(
     name: 'iPhone 8',
     screenWidth: 375, screenHeight: 667, memory: 2,
-    devicePixelRatio: 2.0,
+    devicePixelRatio: 2.0, hwConcurrency: 2,
     iosVersions: ['16.7.10', '16.7.8', '16.7.5', '16.6.1'],
   ),
   // iPhone 7 series (iOS 15 max)
   _BaseDevice(
     name: 'iPhone 7 Plus',
     screenWidth: 414, screenHeight: 736, memory: 3,
+    hwConcurrency: 2,
     iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
   ),
   _BaseDevice(
     name: 'iPhone 7',
     screenWidth: 375, screenHeight: 667, memory: 2,
-    devicePixelRatio: 2.0,
+    devicePixelRatio: 2.0, hwConcurrency: 2,
     iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
   ),
   // iPhone 6s series (iOS 15 max)
   _BaseDevice(
     name: 'iPhone 6s Plus',
     screenWidth: 414, screenHeight: 736, memory: 2,
+    hwConcurrency: 2,
     iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
   ),
   _BaseDevice(
     name: 'iPhone 6s',
     screenWidth: 375, screenHeight: 667, memory: 2,
-    devicePixelRatio: 2.0,
+    devicePixelRatio: 2.0, hwConcurrency: 2,
     iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
   ),
   // iPhone SE (DPR = 2.0, không phải 3.0 như các iPhone khác)
@@ -260,7 +264,7 @@ const List<_BaseDevice> _baseDevices = [
   _BaseDevice(
     name: 'iPhone SE (1st gen)',
     screenWidth: 320, screenHeight: 568, memory: 2,
-    devicePixelRatio: 2.0,
+    devicePixelRatio: 2.0, hwConcurrency: 2,
     iosVersions: ['15.8.3', '15.8.2', '15.7.9', '15.6.1'],
   ),
 ];
@@ -335,8 +339,8 @@ String buildAntiFingerprintScript(DeviceProfile p) {
 
   return '''
 (function() {
-  if (window.__fpPatched) return;
-  window.__fpPatched = true;
+  var _k='_wk0';
+  try{if(window[_k])return;Object.defineProperty(window,_k,{value:1,enumerable:false,configurable:false,writable:false});}catch(e){}
 
   // ── 0. Wipe storage NGAY trước khi page scripts đọc được ────────────────
   try{localStorage.clear();}catch(e){}
@@ -472,13 +476,7 @@ String buildAntiFingerprintScript(DeviceProfile p) {
 
       CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
         const img = origGetImageData.call(this, x, y, w, h);
-        let s = SEED;
-        for (let i = 0; i < img.data.length; i += 4) {
-          s = lcg(s);
-          img.data[i]     = (img.data[i]     + (s & 3))        & 0xFF;
-          img.data[i + 1] = (img.data[i + 1] + ((s >> 2) & 3)) & 0xFF;
-          img.data[i + 2] = (img.data[i + 2] + ((s >> 4) & 3)) & 0xFF;
-        }
+        if (img.data.length >= 4) img.data[0] = (img.data[0] + (SEED & 3)) & 0xFF;
         return img;
       };
       nativeStr(CanvasRenderingContext2D.prototype.getImageData, 'getImageData');
@@ -728,23 +726,33 @@ String buildAntiFingerprintScript(DeviceProfile p) {
     try { window.ontouchmove = null; } catch(e) {}
     try { window.ontouchend = null; } catch(e) {}
 
-    // ── 25. Function.prototype.toString — ẩn các patch ───────────────────
-    Function.prototype.toString = (function(origToString) {
-      const fn = function() {
-        const s = origToString.call(this);
-        if (s.includes('__puppeteer') || s.includes('__playwright') ||
-            s.includes('__webdriver') || s.includes('__fpPatched')) {
-          return 'function () { [native code] }';
-        }
-        return s;
-      };
-      fn.toString = function() { return 'function toString() { [native code] }'; };
-      return fn;
-    })(Function.prototype.toString);
+    // ── 25. Function.prototype.toString — hide patched functions ──────────
+    (function() {
+      try {
+        var origTS = Function.prototype.toString;
+        function patched() { return origTS.call(this); }
+        Object.defineProperty(Function.prototype, 'toString', {
+          value: patched, enumerable: false, configurable: true, writable: true
+        });
+        Object.defineProperty(patched, 'toString', {
+          value: function() { return 'function toString() { [native code] }'; },
+          enumerable: false, configurable: true
+        });
+      } catch(e) {}
+    })();
 
     // ── 26. Eval native string ────────────────────────────────────────────
     try {
       window.eval.toString = function() { return 'function eval() { [native code] }'; };
+    } catch(e) {}
+
+    // ── 27. Hide _wk JS channel from property enumeration ────────────────
+    try {
+      if (window._wk) {
+        Object.defineProperty(window, '_wk', {
+          value: window._wk, enumerable: false, configurable: true, writable: false
+        });
+      }
     } catch(e) {}
 
   } catch(e) {}
@@ -806,7 +814,7 @@ String buildAutoFillScript(String email, String password,
   var passEl  = findFirst(['input[type="password"]','input[name="password"]','input[name="loginPassword"]','input[id*="pass"]']);
 
   function done() {
-    window.FlutterChannel.postMessage('{"type":"typeDone","field":"autofill"}');
+    window._wk.postMessage('{"type":"typeDone","field":"autofill"}');
   }
 
   if (emailEl && passEl) {
@@ -872,14 +880,14 @@ String buildOtpAutoSubmitScript(String otp,
   ]);
 
   if (!el) {
-    window.FlutterChannel.postMessage('{"type":"otpStatus","status":"noField"}');
+    window._wk.postMessage('{"type":"otpStatus","status":"noField"}');
     return;
   }
 
-  window.FlutterChannel.postMessage('{"type":"otpStatus","status":"filling"}');
+  window._wk.postMessage('{"type":"otpStatus","status":"filling"}');
 
   typeChars(el, '$otp', function() {
-    window.FlutterChannel.postMessage('{"type":"otpStatus","status":"filled"}');
+    window._wk.postMessage('{"type":"otpStatus","status":"filled"}');
     setTimeout(function() {
       var submitEl =
         document.querySelector('a#authBtn') ||
@@ -897,9 +905,9 @@ String buildOtpAutoSubmitScript(String otp,
       }
       if (submitEl) {
         submitEl.click();
-        window.FlutterChannel.postMessage('{"type":"otpStatus","status":"submitted"}');
+        window._wk.postMessage('{"type":"otpStatus","status":"submitted"}');
       } else {
-        window.FlutterChannel.postMessage('{"type":"otpStatus","status":"noButton"}');
+        window._wk.postMessage('{"type":"otpStatus","status":"noButton"}');
       }
     }, 600);
   });
@@ -941,7 +949,7 @@ String buildOtpErrorDetectScript() {
   ];
   var text = document.body ? document.body.innerText : '';
   if (kws.some(function(k){ return text.includes(k); })) {
-    window.FlutterChannel.postMessage(JSON.stringify({type:'otpError',detected:true}));
+    window._wk.postMessage(JSON.stringify({type:'otpError',detected:true}));
   }
 })();
 ''';
