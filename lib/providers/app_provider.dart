@@ -29,6 +29,9 @@ class AppProvider extends ChangeNotifier {
   bool _blockImages = false;
   String _otpSource = 'clipboard'; // 'imap' or 'clipboard'
   String _targetProductName = '';
+  int _typingMinDelay = 80;
+  int _typingMaxDelay = 180;
+  int _otpWatchdogSeconds = 60;
   final List<LotteryResultEntry> _lotteryResults = [];
   final List<OrderStatusEntry> _orderStatusResults = [];
   bool _loaded = false;
@@ -67,6 +70,9 @@ class AppProvider extends ChangeNotifier {
   String get otpSource => _otpSource;
   bool get isClipboardOtpMode => _otpSource == 'clipboard';
   String get targetProductName => _targetProductName;
+  int get typingMinDelay => _typingMinDelay;
+  int get typingMaxDelay => _typingMaxDelay;
+  int get otpWatchdogSeconds => _otpWatchdogSeconds;
   List<LotteryResultEntry> get lotteryResults => List.unmodifiable(_lotteryResults);
   List<OrderStatusEntry> get orderStatusResults => List.unmodifiable(_orderStatusResults);
   bool get loaded => _loaded;
@@ -108,6 +114,9 @@ class AppProvider extends ChangeNotifier {
     _blockImages = await _storage.loadBlockImages();
     _otpSource = await _storage.loadOtpSource();
     _targetProductName = await _storage.loadTargetProductName();
+    _typingMinDelay = await _storage.loadTypingMinDelay();
+    _typingMaxDelay = await _storage.loadTypingMaxDelay();
+    _otpWatchdogSeconds = await _storage.loadOtpWatchdogSeconds();
     _loaded = true;
     _setupOtpStream();
     notifyListeners();
@@ -270,6 +279,24 @@ class AppProvider extends ChangeNotifier {
   Future<void> setBlockImages(bool v) async {
     _blockImages = v;
     await _storage.saveBlockImages(v);
+    notifyListeners();
+  }
+
+  Future<void> setTypingMinDelay(int v) async {
+    _typingMinDelay = v.clamp(30, 500);
+    await _storage.saveTypingMinDelay(_typingMinDelay);
+    notifyListeners();
+  }
+
+  Future<void> setTypingMaxDelay(int v) async {
+    _typingMaxDelay = v.clamp(30, 500);
+    await _storage.saveTypingMaxDelay(_typingMaxDelay);
+    notifyListeners();
+  }
+
+  Future<void> setOtpWatchdogSeconds(int v) async {
+    _otpWatchdogSeconds = v.clamp(10, 300);
+    await _storage.saveOtpWatchdogSeconds(_otpWatchdogSeconds);
     notifyListeners();
   }
 

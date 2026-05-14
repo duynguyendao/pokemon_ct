@@ -80,6 +80,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _pendingOrderStatusNavigation = false;
   Completer<List<dynamic>>? _orderStatusCompleter;
 
+  // Human-like typing completer — resolves khi JS báo typeDone
+  Completer<void>? _typeCompleter;
+
   // reCAPTCHA / blocked page recovery
   int _captchaRetryCount = 0;
   static const int _maxCaptchaRetries = 5;
@@ -736,6 +739,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _handleJsMessage(String message) {
+    // JS typing hoàn thành → unblock _autoFill
+    if (message.contains('"type":"typeDone"')) {
+      if (_typeCompleter != null && !_typeCompleter!.isCompleted) {
+        _typeCompleter!.complete();
+      }
+      return;
+    }
+
     // DOM element ready signal → resolve pending completer
     if (message.contains('"type":"domReady"')) {
       final tokenMatch = RegExp(r'"token":"([^"]+)"').firstMatch(message);
@@ -1031,11 +1042,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (context.read<AppProvider>().isClipboardOtpMode) {
       await Clipboard.setData(const ClipboardData(text: ''));
     }
-    await _controller.runJavaScript(buildOtpAutoSubmitScript(otp));
+    final pOtp = context.read<AppProvider>();
+    await _controller.runJavaScript(
+      buildOtpAutoSubmitScript(
+        otp,
+        minDelay: pOtp.typingMinDelay,
+        maxDelay: pOtp.typingMaxDelay,
+      ),
+    );
 
-    // Watchdog: nếu trang không chuyển sau 60s kể từ khi submit → kiểm tra session
+    // Watchdog: nếu trang không chuyển sau N giây → kiểm tra session
     _otpFreezeTimer?.cancel();
-    _otpFreezeTimer = Timer(const Duration(seconds: 60), () {
+    _otpFreezeTimer = Timer(Duration(seconds: pOtp.otpWatchdogSeconds), () {
       if (!mounted) return;
       if (_currentUrl == _lastOtpPageUrl) {
         unawaited(_handleOtpFreeze());
@@ -1349,9 +1367,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
         'input[name="loginEmail"]',
         'input[id*="email"]',
       ], timeout: 3000);
+      final p2 = context.read<AppProvider>();
+      _typeCompleter = Completer<void>();
       await _controller.runJavaScript(
-        buildAutoFillScript(widget.account.email, widget.account.password),
+        buildAutoFillScript(
+          widget.account.email, widget.account.password,
+          minDelay: p2.typingMinDelay,
+          maxDelay: p2.typingMaxDelay,
+        ),
       );
+      // Chờ JS typing hoàn thành (timeout an toàn 30s)
+      await _typeCompleter!.future.timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {},
+      );
+      _typeCompleter = null;
       _setStatus('🔐 Đang login...');
       await _waitForElement([
         'a.loginBtn',

@@ -126,6 +126,41 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  Future<void> _changeBatchMode(AppProvider p) async {
+    final mode = await showDialog<AccountMode>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: Text(
+          'Đổi mode cho ${_selected.length} account',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: AccountMode.values.map((m) => ListTile(
+            title: Text(m.label, style: const TextStyle(color: Colors.white)),
+            onTap: () => Navigator.pop(context, m),
+          )).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Hủy'),
+          ),
+        ],
+      ),
+    );
+    if (mode == null) return;
+    for (final id in _selected.toList()) {
+      final idx = p.accounts.indexWhere((a) => a.id == id);
+      if (idx >= 0) await p.updateAccount(p.accounts[idx].copyWith(mode: mode));
+    }
+    setState(() {
+      _selected.clear();
+      _batchMode = false;
+    });
+  }
+
   Future<void> _deleteBatch(AppProvider p) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -739,6 +774,57 @@ class _HomeScreenState extends State<HomeScreen>
                     : null,
               ),
               const Divider(height: 1),
+              const SizedBox(height: 8),
+              const Text(
+                'Tốc độ nhập (ms/ký tự)',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
+              Row(
+                children: [
+                  const Text('Min', style: TextStyle(color: Colors.white, fontSize: 13)),
+                  Expanded(
+                    child: Slider(
+                      value: prov.typingMinDelay.toDouble(),
+                      min: 30, max: 300, divisions: 27,
+                      label: '${prov.typingMinDelay}ms',
+                      activeColor: AppColors.secondary,
+                      onChanged: (v) => prov.setTypingMinDelay(v.round()),
+                    ),
+                  ),
+                  Text('${prov.typingMinDelay}ms', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ],
+              ),
+              Row(
+                children: [
+                  const Text('Max', style: TextStyle(color: Colors.white, fontSize: 13)),
+                  Expanded(
+                    child: Slider(
+                      value: prov.typingMaxDelay.toDouble(),
+                      min: 30, max: 500, divisions: 47,
+                      label: '${prov.typingMaxDelay}ms',
+                      activeColor: AppColors.secondary,
+                      onChanged: (v) => prov.setTypingMaxDelay(v.round()),
+                    ),
+                  ),
+                  Text('${prov.typingMaxDelay}ms', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ],
+              ),
+              Row(
+                children: [
+                  const Text('OTP watchdog', style: TextStyle(color: Colors.white, fontSize: 13)),
+                  Expanded(
+                    child: Slider(
+                      value: prov.otpWatchdogSeconds.toDouble(),
+                      min: 10, max: 300, divisions: 29,
+                      label: '${prov.otpWatchdogSeconds}s',
+                      activeColor: AppColors.accent,
+                      onChanged: (v) => prov.setOtpWatchdogSeconds(v.round()),
+                    ),
+                  ),
+                  Text('${prov.otpWatchdogSeconds}s', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ],
+              ),
+              const Divider(height: 1),
               ListTile(
                 leading: const Icon(
                   Icons.travel_explore,
@@ -901,6 +987,11 @@ class _HomeScreenState extends State<HomeScreen>
               icon: const Icon(Icons.drive_file_move_outlined),
               tooltip: 'Chuyển nhóm',
               onPressed: _selected.isEmpty ? null : () => _moveBatchToGroup(p),
+            ),
+            IconButton(
+              icon: const Icon(Icons.tune, color: AppColors.secondary),
+              tooltip: 'Đổi mode',
+              onPressed: _selected.isEmpty ? null : () => _changeBatchMode(p),
             ),
             IconButton(
               icon: const Icon(Icons.delete, color: AppColors.error),

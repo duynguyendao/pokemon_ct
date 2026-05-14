@@ -19,6 +19,9 @@ class StorageService {
   static const _otpSourceKey = 'otpSource';
   static const _targetProductNameKey = 'targetProductName';
   static const _blockImagesKey = 'blockImages';
+  static const _typingMinDelayKey = 'typingMinDelay';
+  static const _typingMaxDelayKey = 'typingMaxDelay';
+  static const _otpWatchdogSecondsKey = 'otpWatchdogSeconds';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -173,6 +176,36 @@ class StorageService {
   Future<void> saveBlockImages(bool v) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_blockImagesKey, v);
+  }
+
+  Future<int> loadTypingMinDelay() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_typingMinDelayKey) ?? 80;
+  }
+
+  Future<void> saveTypingMinDelay(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_typingMinDelayKey, v);
+  }
+
+  Future<int> loadTypingMaxDelay() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_typingMaxDelayKey) ?? 180;
+  }
+
+  Future<void> saveTypingMaxDelay(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_typingMaxDelayKey, v);
+  }
+
+  Future<int> loadOtpWatchdogSeconds() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_otpWatchdogSecondsKey) ?? 60;
+  }
+
+  Future<void> saveOtpWatchdogSeconds(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_otpWatchdogSecondsKey, v);
   }
 
   List<FilterRule> _defaultRules() => [

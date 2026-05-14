@@ -908,107 +908,157 @@ String buildAntiFingerprintScript(DeviceProfile p) {
 ''';
 }
 
-String buildAutoFillScript(String email, String password) {
-  final safeEmail = email.replaceAll("'", "\\'");
-  final safePass = password.replaceAll("'", "\\'");
+String _jsEsc(String s) => s
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "\\'")
+    .replaceAll('\n', '\\n')
+    .replaceAll('\r', '\\r');
+
+String buildAutoFillScript(String email, String password,
+    {int minDelay = 80, int maxDelay = 180}) {
+  final safeEmail = _jsEsc(email);
+  final safePass = _jsEsc(password);
   return '''
 (function() {
-  function setNativeValue(el, value) {
-    const nativeInput = Object.getOwnPropertyDescriptor(
-      el.tagName === 'INPUT' ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype,
-      'value'
-    );
-    if (nativeInput && nativeInput.set) {
-      nativeInput.set.call(el, value);
-    } else {
-      el.value = value;
-    }
-    el.dispatchEvent(new Event('input',  { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur',   { bubbles: true }));
+  var minD = $minDelay, maxD = $maxDelay;
+  var nSet = (Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') || {}).set;
+
+  function setVal(el, v) {
+    if (nSet) nSet.call(el, v); else el.value = v;
   }
 
-  function fillFirst(selectors, value) {
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el) { setNativeValue(el, value); return true; }
+  function typeChars(el, text, onDone) {
+    el.focus();
+    setVal(el, '');
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    var i = 0;
+    function next() {
+      if (i >= text.length) {
+        el.dispatchEvent(new Event('change', {bubbles:true}));
+        el.dispatchEvent(new Event('blur', {bubbles:true}));
+        onDone();
+        return;
+      }
+      var ch = text[i++];
+      el.dispatchEvent(new KeyboardEvent('keydown',  {key:ch, bubbles:true, cancelable:true}));
+      el.dispatchEvent(new KeyboardEvent('keypress', {key:ch, charCode:ch.charCodeAt(0), bubbles:true, cancelable:true}));
+      setVal(el, el.value + ch);
+      el.dispatchEvent(new Event('input', {bubbles:true}));
+      el.dispatchEvent(new KeyboardEvent('keyup', {key:ch, bubbles:true}));
+      setTimeout(next, minD + Math.random() * (maxD - minD));
     }
-    return false;
+    setTimeout(next, minD + Math.random() * (maxD - minD));
   }
 
-  fillFirst([
-    'input[type="email"]','input[name="email"]','input[name="loginEmail"]',
-    'input[name="username"]','input[id*="email"]','input[placeholder*="メール"]',
-    'input[placeholder*="email" i]',
-  ], '$safeEmail');
+  function findFirst(sels) {
+    for (var i = 0; i < sels.length; i++) {
+      var el = document.querySelector(sels[i]);
+      if (el) return el;
+    }
+    return null;
+  }
 
-  fillFirst([
-    'input[type="password"]','input[name="password"]','input[name="loginPassword"]',
-    'input[id*="pass"]',
-  ], '$safePass');
+  var emailEl = findFirst(['input[type="email"]','input[name="email"]','input[name="loginEmail"]','input[name="username"]','input[id*="email"]','input[placeholder*="メール"]','input[placeholder*="email" i]']);
+  var passEl  = findFirst(['input[type="password"]','input[name="password"]','input[name="loginPassword"]','input[id*="pass"]']);
+
+  function done() {
+    window.FlutterChannel.postMessage('{"type":"typeDone","field":"autofill"}');
+  }
+
+  if (emailEl && passEl) {
+    typeChars(emailEl, '$safeEmail', function() { typeChars(passEl, '$safePass', done); });
+  } else if (emailEl) {
+    typeChars(emailEl, '$safeEmail', done);
+  } else if (passEl) {
+    typeChars(passEl, '$safePass', done);
+  } else {
+    done();
+  }
 })();
 ''';
 }
 
-String buildOtpAutoSubmitScript(String otp) {
+String buildOtpAutoSubmitScript(String otp,
+    {int minDelay = 80, int maxDelay = 180}) {
   return '''
 (function() {
-  function setNativeValue(el, value) {
-    const nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-    if (nativeInput && nativeInput.set) {
-      nativeInput.set.call(el, value);
-    } else {
-      el.value = value;
-    }
-    el.dispatchEvent(new Event('input',  { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+  var minD = $minDelay, maxD = $maxDelay;
+  var nSet = (Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') || {}).set;
+
+  function setVal(el, v) {
+    if (nSet) nSet.call(el, v); else el.value = v;
   }
 
-  var otpSelectors = [
-    'input#authCode',
-    'input[name="dwfrm_factor2Auth_authCode"]',
+  function typeChars(el, text, onDone) {
+    el.focus();
+    setVal(el, '');
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    var i = 0;
+    function next() {
+      if (i >= text.length) {
+        el.dispatchEvent(new Event('change', {bubbles:true}));
+        el.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));
+        onDone();
+        return;
+      }
+      var ch = text[i++];
+      el.dispatchEvent(new KeyboardEvent('keydown',  {key:ch, bubbles:true, cancelable:true}));
+      el.dispatchEvent(new KeyboardEvent('keypress', {key:ch, charCode:ch.charCodeAt(0), bubbles:true, cancelable:true}));
+      setVal(el, el.value + ch);
+      el.dispatchEvent(new Event('input', {bubbles:true}));
+      el.dispatchEvent(new KeyboardEvent('keyup', {key:ch, bubbles:true}));
+      setTimeout(next, minD + Math.random() * (maxD - minD));
+    }
+    setTimeout(next, minD + Math.random() * (maxD - minD));
+  }
+
+  function findFirst(sels) {
+    for (var i = 0; i < sels.length; i++) {
+      var el = document.querySelector(sels[i]);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  var el = findFirst([
+    'input#authCode','input[name="dwfrm_factor2Auth_authCode"]',
     'input[name="passcode"]','input[name="otp"]','input[name="code"]',
     'input[id*="auth"]','input[id*="otp"]','input[id*="passcode"]',
     'input[placeholder*="パスコード"]','input[maxlength="6"]',
-  ];
+  ]);
 
-  var filled = false;
-  for (var i = 0; i < otpSelectors.length; i++) {
-    var el = document.querySelector(otpSelectors[i]);
-    if (el) { setNativeValue(el, '$otp'); filled = true; break; }
-  }
-
-  if (!filled) {
+  if (!el) {
     window.FlutterChannel.postMessage('{"type":"otpStatus","status":"noField"}');
     return;
   }
-  window.FlutterChannel.postMessage('{"type":"otpStatus","status":"filled"}');
 
-  setTimeout(function() {
-    var submitEl =
-      document.querySelector('a#authBtn') ||
-      document.querySelector('a[id*="auth"]') ||
-      document.querySelector('button[id*="auth"]');
+  window.FlutterChannel.postMessage('{"type":"otpStatus","status":"filling"}');
 
-    if (!submitEl) {
-      var all = Array.from(document.querySelectorAll('button,input[type="submit"],a'));
-      var kws = ['認証','送信','確認','次へ','submit','confirm'];
-      for (var j = 0; j < all.length; j++) {
-        var t = (all[j].textContent || all[j].value || '').trim();
-        if (kws.some(function(k){ return t.indexOf(k) >= 0 || t.toLowerCase().indexOf(k) >= 0; })) {
-          submitEl = all[j]; break;
+  typeChars(el, '$otp', function() {
+    window.FlutterChannel.postMessage('{"type":"otpStatus","status":"filled"}');
+    setTimeout(function() {
+      var submitEl =
+        document.querySelector('a#authBtn') ||
+        document.querySelector('a[id*="auth"]') ||
+        document.querySelector('button[id*="auth"]');
+      if (!submitEl) {
+        var all = Array.from(document.querySelectorAll('button,input[type="submit"],a'));
+        var kws = ['認証','送信','確認','次へ','submit','confirm'];
+        for (var j = 0; j < all.length; j++) {
+          var t = (all[j].textContent || all[j].value || '').trim();
+          if (kws.some(function(k){ return t.indexOf(k) >= 0 || t.toLowerCase().indexOf(k) >= 0; })) {
+            submitEl = all[j]; break;
+          }
         }
       }
-    }
-
-    if (submitEl) {
-      submitEl.click();
-      window.FlutterChannel.postMessage('{"type":"otpStatus","status":"submitted"}');
-    } else {
-      window.FlutterChannel.postMessage('{"type":"otpStatus","status":"noButton"}');
-    }
-  }, 600);
+      if (submitEl) {
+        submitEl.click();
+        window.FlutterChannel.postMessage('{"type":"otpStatus","status":"submitted"}');
+      } else {
+        window.FlutterChannel.postMessage('{"type":"otpStatus","status":"noButton"}');
+      }
+    }, 600);
+  });
 })();
 ''';
 }
