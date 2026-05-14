@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
+import '../models/shipping_entry.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
 
@@ -578,6 +580,10 @@ class _OtherScreenState extends State<OtherScreen>
               _buildOrderKeywordCard(p),
               const SizedBox(height: 16),
               if (all.isNotEmpty) _buildOrderResultsSection(p, all, rows),
+              if (p.shippingResults.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                _buildShippingSection(p),
+              ],
             ],
           ),
         );
@@ -986,5 +992,158 @@ class _OtherScreenState extends State<OtherScreen>
         ),
       ),
     );
+  }
+
+  // ─── Shipping section (発送済み tracking info) ──────────────────────────────
+
+  Widget _buildShippingSection(AppProvider p) {
+    final rows = p.shippingResults;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              '🚚 発送済み — Mã vận chuyển',
+              style: TextStyle(
+                  color: AppColors.done,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14),
+            ),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.copy_all,
+                  color: AppColors.textSecondary, size: 18),
+              tooltip: 'Copy CSV',
+              onPressed: () => _copyShippingCsv(rows),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: AppColors.error, size: 18),
+              tooltip: 'Xóa',
+              onPressed: () => p.clearShippingResults(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.done.withAlpha(60)),
+          ),
+          child: Column(
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.done.withAlpha(25),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+                ),
+                child: const Row(
+                  children: [
+                    Expanded(flex: 3, child: Text('Email', style: TextStyle(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.bold))),
+                    Expanded(flex: 2, child: Text('送り状番号', style: TextStyle(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.bold))),
+                    Expanded(flex: 3, child: Text('お届け先', style: TextStyle(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.bold))),
+                    SizedBox(width: 40),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: AppColors.divider),
+              ...rows.asMap().entries.map((e) => Column(
+                children: [
+                  if (e.key > 0) const Divider(height: 1, color: AppColors.divider),
+                  _buildShippingRow(e.value),
+                ],
+              )),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildShippingRow(ShippingEntry e) {
+    return GestureDetector(
+      onLongPress: () {
+        Clipboard.setData(ClipboardData(
+            text: '${e.accountEmail},${e.trackingNumDisplay},${e.deliveryInfo},${e.trackingLink}'));
+        _snack('Copied', duration: const Duration(seconds: 1));
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(e.accountEmail,
+                      style: const TextStyle(color: Colors.white, fontSize: 11),
+                      overflow: TextOverflow.ellipsis),
+                  if (e.productTitle.isNotEmpty)
+                    Text(e.productTitle,
+                        style: const TextStyle(
+                            color: AppColors.textSecondary, fontSize: 10),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 2),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: GestureDetector(
+                onTap: () => Clipboard.setData(
+                    ClipboardData(text: e.trackingNum)),
+                child: Text(
+                  e.trackingNumDisplay.isEmpty ? '—' : e.trackingNumDisplay,
+                  style: const TextStyle(
+                      color: AppColors.done,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Text(
+                e.deliveryInfo.isEmpty ? '—' : e.deliveryInfo,
+                style: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 10),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (e.trackingLink.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.open_in_browser,
+                    color: AppColors.accent, size: 18),
+                tooltip: '配送状況を確認する',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                onPressed: () async {
+                  final uri = Uri.parse(e.trackingLink);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+              )
+            else
+              const SizedBox(width: 32),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _copyShippingCsv(List<ShippingEntry> rows) {
+    final lines = ['Email,送り状番号,お届け先,注文番号,配送確認リンク'];
+    for (final r in rows) {
+      lines.add('${_csvField(r.accountEmail)},${_csvField(r.trackingNumDisplay)},${_csvField(r.deliveryInfo)},${_csvField(r.orderNum)},${_csvField(r.trackingLink)}');
+    }
+    Clipboard.setData(ClipboardData(text: lines.join('\n')));
+    _snack('Đã copy ${rows.length} dòng CSV');
   }
 }

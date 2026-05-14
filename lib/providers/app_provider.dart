@@ -6,6 +6,7 @@ import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
+import '../models/shipping_entry.dart';
 import '../services/storage_service.dart';
 import '../services/imap_service.dart';
 
@@ -34,6 +35,7 @@ class AppProvider extends ChangeNotifier {
   int _otpWatchdogSeconds = 60;
   final List<LotteryResultEntry> _lotteryResults = [];
   final List<OrderStatusEntry> _orderStatusResults = [];
+  final List<ShippingEntry> _shippingResults = [];
   bool _loaded = false;
   bool _imapStarting = false;
   bool _imapStopping = false;
@@ -75,6 +77,7 @@ class AppProvider extends ChangeNotifier {
   int get otpWatchdogSeconds => _otpWatchdogSeconds;
   List<LotteryResultEntry> get lotteryResults => List.unmodifiable(_lotteryResults);
   List<OrderStatusEntry> get orderStatusResults => List.unmodifiable(_orderStatusResults);
+  List<ShippingEntry> get shippingResults => List.unmodifiable(_shippingResults);
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
@@ -342,6 +345,17 @@ class AppProvider extends ChangeNotifier {
 
   void clearOrderStatusResults() {
     _orderStatusResults.clear();
+    notifyListeners();
+  }
+
+  void addShippingResult(ShippingEntry entry) {
+    _shippingResults.removeWhere((e) => e.accountEmail == entry.accountEmail);
+    _shippingResults.add(entry);
+    notifyListeners();
+  }
+
+  void clearShippingResults() {
+    _shippingResults.clear();
     notifyListeners();
   }
 

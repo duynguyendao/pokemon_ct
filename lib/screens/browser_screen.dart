@@ -8,6 +8,7 @@ import '../models/account.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
 import '../models/otp_entry.dart';
+import '../models/shipping_entry.dart';
 import '../models/proxy.dart';
 import '../providers/app_provider.dart';
 import '../services/shortcut_service.dart';
@@ -82,6 +83,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // Human-like typing completer — resolves khi JS báo typeDone
   Completer<void>? _typeCompleter;
+
+  // Shipping info extraction (orderStatus mode, 発送済み)
+  Completer<Map<String, dynamic>>? _shippingCompleter;
 
   // reCAPTCHA / blocked page recovery
   int _captchaRetryCount = 0;
@@ -193,14 +197,54 @@ class _BrowserScreenState extends State<BrowserScreen> {
       status = 'キャンセル済み';
     }
 
+    var btnLink = li.querySelector('.comBtn a');
     result.push({
       title: ttlEl ? ttlEl.textContent.trim() : '',
       orderNum: numEl ? numEl.textContent.trim() : '',
       status: status,
-      time: timeEl ? timeEl.textContent.trim() : ''
+      time: timeEl ? timeEl.textContent.trim() : '',
+      detailUrl: btnLink ? btnLink.href : ''
     });
   });
   window._wk.postMessage(JSON.stringify({type:'orderStatusResult',data:result}));
+})();
+''';
+
+  static const String _shippingExtractJs = '''
+(function() {
+  var data = {};
+  // 注文番号 / 送り状番号 from info_list
+  var infoItems = document.querySelectorAll('.order_info_block .info_list .-item');
+  for (var i = 0; i < infoItems.length; i++) {
+    var ttl = infoItems[i].querySelector('.-ttl');
+    var val = infoItems[i].querySelector('.-data');
+    if (!ttl || !val) continue;
+    var t = ttl.textContent.trim();
+    var v = val.textContent.replace(/\\n/g, ' ').trim();
+    if (t === '注文番号') data.orderNum = v;
+    if (t.indexOf('送り状') >= 0) {
+      data.trackingNumDisplay = v.replace(/\\s+/g, ' ').trim();
+      data.trackingNum = v.replace(/[-\\s\\n]/g, '').trim();
+    }
+  }
+  // Tracking link (kuronekoyamato)
+  var linkEl = document.querySelector('.linkBox .comBtn01 a[href*="kuronekoyamato"]');
+  if (!linkEl) linkEl = document.querySelector('.linkBox a[href*="pno="]');
+  data.trackingLink = linkEl ? linkEl.href : '';
+  // Build link from tracking num if not found
+  if (!data.trackingLink && data.trackingNum) {
+    data.trackingLink = 'https://member.kms.kuronekoyamato.co.jp/parcel/detail?pno=' + data.trackingNum;
+  }
+  // お届け先情報 from confirmDl
+  var dts = document.querySelectorAll('.confirmDl dt');
+  var dds = document.querySelectorAll('.confirmDl dd');
+  for (var j = 0; j < dts.length; j++) {
+    if (dts[j].textContent.indexOf('お届け先') >= 0) {
+      data.deliveryInfo = dds[j] ? dds[j].textContent.replace(/\\s+/g, ' ').trim() : '';
+      break;
+    }
+  }
+  window._wk.postMessage(JSON.stringify({type:'shippingInfo', data:data}));
 })();
 ''';
 
@@ -793,6 +837,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
       return;
     }
 
+    // Shipping info extraction response (発送済み detail page)
+    if (message.contains('"type":"shippingInfo"')) {
+      try {
+        final data = jsonDecode(message) as Map<String, dynamic>;
+        final info = (data['data'] as Map<String, dynamic>?) ?? {};
+        if (_shippingCompleter?.isCompleted == false) {
+          _shippingCompleter!.complete(info);
+        }
+      } catch (_) {}
+      return;
+    }
+
     // OTP field phát hiện → auto submit
     if (message.contains('"type":"otpField"') &&
         message.contains('"detected":true')) {
@@ -1228,9 +1284,26 @@ class _BrowserScreenState extends State<BrowserScreen> {
           time: item['time'] as String? ?? '',
         );
         provider.addOrderStatusResult(entry);
-        final icon = entry.isShipped ? '🚚' : entry.isPreparing ? '📦' : '📋';
-        _setStatus('$icon ${entry.status} — ${entry.productTitle}');
-        await Future.delayed(const Duration(seconds: 2));
+
+        if (entry.isShipped) {
+          final detailUrl = item['detailUrl'] as String? ?? '';
+          if (detailUrl.isNotEmpty) {
+            await _extractShippingInfo(
+              provider: provider,
+              email: email,
+              detailUrl: detailUrl,
+              entry: entry,
+            );
+          } else {
+            _setStatus('🚚 発送済み — không có link chi tiết');
+            await Future.delayed(const Duration(seconds: 2));
+          }
+        } else {
+          final icon = entry.isPreparing ? '📦' : '📋';
+          _setStatus('$icon ${entry.status} — ${entry.productTitle}');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+
         if (mounted) Navigator.of(context).pop();
         return;
       }
@@ -1242,6 +1315,60 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _setStatus('対象なし — không tìm thấy order "$keyword"');
     await Future.delayed(const Duration(seconds: 2));
     if (mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _extractShippingInfo({
+    required AppProvider provider,
+    required String email,
+    required String detailUrl,
+    required OrderStatusEntry entry,
+  }) async {
+    if (!mounted) return;
+    _setStatus('🚚 発送済み — đang lấy mã vận chuyển...');
+    await _controller.loadRequest(Uri.parse(detailUrl));
+
+    // Wait for order info block to appear
+    await _waitForElement(
+      ['.order_info_block', '.linkBox .comBtn01 a'],
+      timeout: 8000,
+    );
+    await Future.delayed(const Duration(milliseconds: 600));
+
+    _shippingCompleter = Completer<Map<String, dynamic>>();
+    await _controller.runJavaScript(_shippingExtractJs);
+
+    Map<String, dynamic> info;
+    try {
+      info = await _shippingCompleter!.future.timeout(const Duration(seconds: 8));
+    } catch (_) {
+      _setStatus('⚠️ Không lấy được mã vận chuyển');
+      await Future.delayed(const Duration(seconds: 2));
+      return;
+    }
+
+    final trackingNum = info['trackingNum'] as String? ?? '';
+    final trackingNumDisplay = info['trackingNumDisplay'] as String? ?? trackingNum;
+    final trackingLink = info['trackingLink'] as String? ?? '';
+    final deliveryInfo = info['deliveryInfo'] as String? ?? '';
+
+    if (trackingNum.isNotEmpty) {
+      provider.addShippingResult(ShippingEntry(
+        accountEmail: email,
+        orderNum: entry.orderNum,
+        productTitle: entry.productTitle,
+        trackingNumDisplay: trackingNumDisplay,
+        trackingNum: trackingNum,
+        trackingLink: trackingLink.isNotEmpty
+            ? trackingLink
+            : 'https://member.kms.kuronekoyamato.co.jp/parcel/detail?pno=$trackingNum',
+        deliveryInfo: deliveryInfo,
+        time: entry.time,
+      ));
+      _setStatus('📬 送り状: $trackingNumDisplay');
+    } else {
+      _setStatus('🚚 発送済み — không tìm thấy mã vận chuyển');
+    }
+    await Future.delayed(const Duration(seconds: 2));
   }
 
   /// reCAPTCHA / block detected: clear cookies → đổi profile → 5G → retry login
