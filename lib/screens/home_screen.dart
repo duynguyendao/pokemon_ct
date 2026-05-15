@@ -246,14 +246,14 @@ class _HomeScreenState extends State<HomeScreen>
 
     if (mounted) {
 
-      // Xác định URL theo mode của account
-      String startUrl = p.loginUrl;
-      if (account.mode == AccountMode.lottery && p.lotteryUrl.isNotEmpty) {
-        startUrl = p.lotteryUrl;
-      } else if (account.mode == AccountMode.lotteryResult &&
-          p.lotteryResultUrl.isNotEmpty) {
-        startUrl = p.lotteryResultUrl;
-      }
+      // LUÔN start tại loginUrl (mọi mode). Sau khi login + OTP thành công,
+      // browser_screen tự navigate đến URL mode-specific (lotteryUrl /
+      // lotteryResultUrl / orderHistoryUrl) qua _pending*Navigation flags.
+      //
+      // Lý do: trang lottery/order-history protected bởi Akamai WAF, navigate
+      // trực tiếp khi chưa có session sẽ bị Access Denied. Đi qua login trước
+      // tạo session cookie + referer hợp lệ.
+      final String startUrl = p.loginUrl;
 
       final proxy = p.proxyEnabled
           ? p.getProxyById(account.proxyId) ?? p.nextProxy
