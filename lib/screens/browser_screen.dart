@@ -483,6 +483,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
     'ロボットではありません','アクセスが一時的に制限',
     // Login error sau khi click → server block (đặc trưng cho bot detection)
     '時間をおいてから再度','時間をおいてから','時間をおいて再度',
+    // Akamai / WAF access denied
+    'Access Denied','permission to access',
+    'アクセスが拒否されました','アクセスを拒否',
+    'Pardon Our Interruption','Reference #',
   ];
   for (var k = 0; k < criticalKws.length; k++) {
     if (text.indexOf(criticalKws[k]) >= 0) {
@@ -831,7 +835,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ? p.lotteryUrl.split('?').first
                   : p.lotteryUrl;
               if (!url.startsWith(base)) {
-                unawaited(_controller.loadRequest(Uri.parse(p.lotteryUrl)));
+                // Đi qua mypage để thiết lập session/referer trước khi nhảy
+                // sang lottery — tránh Access Denied do direct nav.
+                unawaited(() async {
+                  await _warmupViaHomepage(reason: 'post-otp-lottery');
+                  if (!mounted) return;
+                  await _controller.loadRequest(Uri.parse(p.lotteryUrl));
+                }());
                 return;
               }
             }
@@ -930,8 +940,28 @@ class _BrowserScreenState extends State<BrowserScreen> {
     await _wipeAllSessionData(showStatus: true);
     if (!mounted) return;
 
+    // Pre-warmup qua homepage cho các URL dễ bị Akamai/WAF chặn:
+    // /lottery/*, /order-history/*, /lottery-history/* yêu cầu session + referer.
+    // Direct navigation thường trả về "Access Denied".
+    final needsWarmup = _urlNeedsWarmup(startUrl);
+    if (needsWarmup) {
+      await _warmupViaHomepage(reason: 'init');
+      if (!mounted) return;
+    }
+
     await _controller.loadRequest(Uri.parse(startUrl));
     if (mounted) setState(() => _currentUrl = startUrl);
+  }
+
+  bool _urlNeedsWarmup(String url) {
+    final u = url.toLowerCase();
+    // Login page is OK directly. Lottery/order/result pages need warmup.
+    if (u.contains('/login') && !u.contains('/lottery/')) return false;
+    return u.contains('/lottery/') ||
+        u.contains('/lottery-history') ||
+        u.contains('/order-history') ||
+        u.contains('/order-details') ||
+        u.contains('/mypage');
   }
 
   /// Xóa SẠCH cookies + localStorage + sessionStorage + IndexedDB + CacheStorage
@@ -1783,10 +1813,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
     await Future.delayed(Duration(milliseconds: extraMs));
     if (!mounted) return;
 
-    // 5. Reload URL ban đầu (startUrl) — không phải luôn loginUrl
-    _setStatus('🔃 Login lại...');
+    // 5. Reload URL ban đầu (startUrl) — qua homepage warmup để có session/referer
+    //    (Akamai/WAF thường chặn direct nav đến /lottery/login.html, /lottery/apply.html
+    //     khi chưa có cookie + referer từ pokemoncenter-online.com)
     final target = widget.startUrl ?? p.loginUrl;
+    await _warmupViaHomepage(reason: 'recovery');
+    if (!mounted) return;
+    _setStatus('🔃 Login lại...');
     await _controller.loadRequest(Uri.parse(target));
+  }
+
+  /// Navigate to Pokemon Center homepage briefly, then return.
+  /// Builds a natural session (Akamai cookies + referer) before hitting
+  /// protected URLs like /lottery/login.html which often return Access Denied
+  /// when accessed directly without session context.
+  Future<void> _warmupViaHomepage({String reason = 'init'}) async {
+    if (!mounted) return;
+    _setStatus('🏠 Warmup homepage (chống Access Denied)...');
+    try {
+      await _controller.loadRequest(
+        Uri.parse('https://www.pokemoncenter-online.com/'),
+      );
+    } catch (_) {}
+    // Wait for homepage to actually load (or timeout) + simulate human reading
+    await _waitForElement(['#gHeader', 'header', 'body'], timeout: 5000);
+    final readMs = 2500 + (DateTime.now().millisecond % 1500);
+    await Future.delayed(Duration(milliseconds: readMs));
   }
 
   /// Sau システムエラー hậu OTP — đợi 2s, navigate đến startUrl, rồi check:
