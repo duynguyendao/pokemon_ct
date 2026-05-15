@@ -911,6 +911,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
             }
 
             // Sau OTP thành công trong lottery mode → điều hướng đến trang lottery
+            // KHÔNG warmup homepage ở đây — session đã được thiết lập qua login flow,
+            // direct nav giống order mode. Hop qua homepage SAU OTP là pattern bot
+            // (login → OTP → homepage → lottery) → reCAPTCHA detect.
             if (_pendingLotteryNavigation &&
                 !_lotteryApplied &&
                 p.lotteryUrl.isNotEmpty) {
@@ -919,13 +922,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ? p.lotteryUrl.split('?').first
                   : p.lotteryUrl;
               if (!url.startsWith(base)) {
-                // Đi qua mypage để thiết lập session/referer trước khi nhảy
-                // sang lottery — tránh Access Denied do direct nav.
-                unawaited(() async {
-                  await _warmupViaHomepage(reason: 'post-otp-lottery');
-                  if (!mounted) return;
-                  await _controller.loadRequest(Uri.parse(p.lotteryUrl));
-                }());
+                unawaited(_controller.loadRequest(Uri.parse(p.lotteryUrl)));
                 return;
               }
             }
