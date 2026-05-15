@@ -20,4 +20,15 @@ class ShippingEntry {
   });
 
   bool get hasTracking => trackingNum.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'accountEmail': accountEmail,
+        'orderNum': orderNum,
+        'productTitle': productTitle,
+        'trackingNumDisplay': trackingNumDisplay,
+        'trackingNum': trackingNum,
+        'trackingLink': trackingLink,
+        'deliveryInfo': deliveryInfo,
+        'time': time,
+      };
 }

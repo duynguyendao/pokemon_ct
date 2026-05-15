@@ -18,4 +18,12 @@ class OrderStatusEntry {
   bool get isShipped => status == '発送済み';
   bool get isCancelled => status == 'キャンセル済み';
   bool get isError => status == 'エラー' || status == '対象なし';
+
+  Map<String, dynamic> toJson() => {
+        'accountEmail': accountEmail,
+        'productTitle': productTitle,
+        'orderNum': orderNum,
+        'status': status,
+        'time': time,
+      };
 }

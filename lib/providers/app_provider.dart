@@ -6,6 +6,7 @@ import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
+import '../models/result_snapshot.dart';
 import '../models/shipping_entry.dart';
 import '../services/storage_service.dart';
 import '../services/imap_service.dart';
@@ -36,6 +37,8 @@ class AppProvider extends ChangeNotifier {
   final List<LotteryResultEntry> _lotteryResults = [];
   final List<OrderStatusEntry> _orderStatusResults = [];
   final List<ShippingEntry> _shippingResults = [];
+  List<ResultSnapshot> _snapshots = [];
+  static const int _maxSnapshots = 100;
   bool _loaded = false;
   bool _imapStarting = false;
   bool _imapStopping = false;
@@ -78,6 +81,10 @@ class AppProvider extends ChangeNotifier {
   List<LotteryResultEntry> get lotteryResults => List.unmodifiable(_lotteryResults);
   List<OrderStatusEntry> get orderStatusResults => List.unmodifiable(_orderStatusResults);
   List<ShippingEntry> get shippingResults => List.unmodifiable(_shippingResults);
+  List<ResultSnapshot> get snapshots => List.unmodifiable(_snapshots);
+  List<ResultSnapshot> snapshotsByType(SnapshotType type) =>
+      _snapshots.where((s) => s.type == type).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   bool get loaded => _loaded;
   Stream<OtpEntry> get otpStream => _otpController.stream;
   bool get imapRunning => _imap.isRunning;
@@ -120,6 +127,7 @@ class AppProvider extends ChangeNotifier {
     _typingMinDelay = await _storage.loadTypingMinDelay();
     _typingMaxDelay = await _storage.loadTypingMaxDelay();
     _otpWatchdogSeconds = await _storage.loadOtpWatchdogSeconds();
+    _snapshots = await _storage.loadSnapshots();
     _loaded = true;
     _setupOtpStream();
     notifyListeners();
@@ -356,6 +364,60 @@ class AppProvider extends ChangeNotifier {
 
   void clearShippingResults() {
     _shippingResults.clear();
+    notifyListeners();
+  }
+
+  // --- Result snapshots (history, max 100, persisted) ---
+
+  Future<ResultSnapshot?> saveSnapshotFromCurrentResults(
+    SnapshotType type, {
+    String? keywordOverride,
+  }) async {
+    final keyword = keywordOverride ?? _targetProductName;
+    List<Map<String, dynamic>> entries;
+    switch (type) {
+      case SnapshotType.lottery:
+        if (_lotteryResults.isEmpty) return null;
+        entries = _lotteryResults.map((e) => e.toJson()).toList();
+        break;
+      case SnapshotType.order:
+        if (_orderStatusResults.isEmpty) return null;
+        entries = _orderStatusResults.map((e) => e.toJson()).toList();
+        break;
+      case SnapshotType.shipping:
+        if (_shippingResults.isEmpty) return null;
+        entries = _shippingResults.map((e) => e.toJson()).toList();
+        break;
+    }
+    final snapshot = ResultSnapshot(
+      type: type,
+      keyword: keyword,
+      entries: entries,
+    );
+    _snapshots.add(snapshot);
+    _enforceSnapshotLimit();
+    await _storage.saveSnapshots(_snapshots);
+    notifyListeners();
+    return snapshot;
+  }
+
+  void _enforceSnapshotLimit() {
+    if (_snapshots.length <= _maxSnapshots) return;
+    _snapshots.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    while (_snapshots.length > _maxSnapshots) {
+      _snapshots.removeAt(0);
+    }
+  }
+
+  Future<void> deleteSnapshot(String id) async {
+    _snapshots.removeWhere((s) => s.id == id);
+    await _storage.saveSnapshots(_snapshots);
+    notifyListeners();
+  }
+
+  Future<void> clearSnapshotsByType(SnapshotType type) async {
+    _snapshots.removeWhere((s) => s.type == type);
+    await _storage.saveSnapshots(_snapshots);
     notifyListeners();
   }
 

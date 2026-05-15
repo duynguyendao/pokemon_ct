@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
+import '../models/result_snapshot.dart';
 import '../models/shipping_entry.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
@@ -348,6 +349,23 @@ class _OtherScreenState extends State<OtherScreen>
                 tooltip: 'Copy email 当選',
                 onPressed: () => _copyWonEmails(rows),
               ),
+            IconButton(
+              icon: const Icon(Icons.save_alt,
+                  color: AppColors.done, size: 20),
+              tooltip: 'Save snapshot vào History',
+              onPressed: () async {
+                final s = await p.saveSnapshotFromCurrentResults(SnapshotType.lottery);
+                _snack(s != null
+                    ? 'Đã lưu snapshot (${s.count} entries)'
+                    : 'Không có kết quả để lưu');
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.history,
+                  color: AppColors.secondary, size: 20),
+              tooltip: 'Xem History',
+              onPressed: () => _showHistorySheet(SnapshotType.lottery),
+            ),
             IconButton(
               icon: const Icon(Icons.delete_outline,
                   color: AppColors.error, size: 20),
@@ -755,6 +773,29 @@ class _OtherScreenState extends State<OtherScreen>
               onPressed: () => _copyOrderCsv(rows),
             ),
             IconButton(
+              icon: const Icon(Icons.ios_share,
+                  color: AppColors.accent, size: 20),
+              tooltip: 'Export CSV file',
+              onPressed: () => _exportOrderCsvFile(rows),
+            ),
+            IconButton(
+              icon: const Icon(Icons.save_alt,
+                  color: AppColors.done, size: 20),
+              tooltip: 'Save snapshot vào History',
+              onPressed: () async {
+                final s = await p.saveSnapshotFromCurrentResults(SnapshotType.order);
+                _snack(s != null
+                    ? 'Đã lưu snapshot (${s.count} entries)'
+                    : 'Không có kết quả để lưu');
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.history,
+                  color: AppColors.secondary, size: 20),
+              tooltip: 'Xem History',
+              onPressed: () => _showHistorySheet(SnapshotType.order),
+            ),
+            IconButton(
               icon: const Icon(Icons.delete_outline,
                   color: AppColors.error, size: 20),
               tooltip: 'Xóa tất cả',
@@ -814,7 +855,7 @@ class _OtherScreenState extends State<OtherScreen>
     );
   }
 
-  void _copyOrderCsv(List<OrderStatusEntry> rows) {
+  String _buildOrderCsv(List<OrderStatusEntry> rows) {
     final lines = ['Email,商品名,注文番号,時間,ステータス'];
     for (final r in rows) {
       lines.add([
@@ -825,8 +866,24 @@ class _OtherScreenState extends State<OtherScreen>
         _csvField(r.status),
       ].join(','));
     }
-    Clipboard.setData(ClipboardData(text: lines.join('\r\n')));
+    return lines.join('\r\n');
+  }
+
+  void _copyOrderCsv(List<OrderStatusEntry> rows) {
+    Clipboard.setData(ClipboardData(text: _buildOrderCsv(rows)));
     _snack('Đã copy ${rows.length} dòng CSV');
+  }
+
+  Future<void> _exportOrderCsvFile(List<OrderStatusEntry> rows) async {
+    final csv = _buildOrderCsv(rows);
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-').substring(0, 19);
+    final file = File('${Directory.systemTemp.path}/order_status_$ts.csv');
+    const bom = [0xEF, 0xBB, 0xBF];
+    await file.writeAsBytes([...bom, ...utf8.encode(csv)]);
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'text/csv; charset=utf-8')],
+      subject: 'Order Status $ts',
+    );
   }
 
   Widget _buildOrderTable(List<OrderStatusEntry> rows) {
@@ -1018,6 +1075,29 @@ class _OtherScreenState extends State<OtherScreen>
               onPressed: () => _copyShippingCsv(rows),
             ),
             IconButton(
+              icon: const Icon(Icons.ios_share,
+                  color: AppColors.accent, size: 18),
+              tooltip: 'Export CSV file',
+              onPressed: () => _exportShippingCsvFile(rows),
+            ),
+            IconButton(
+              icon: const Icon(Icons.save_alt,
+                  color: AppColors.done, size: 18),
+              tooltip: 'Save snapshot vào History',
+              onPressed: () async {
+                final s = await p.saveSnapshotFromCurrentResults(SnapshotType.shipping);
+                _snack(s != null
+                    ? 'Đã lưu snapshot (${s.count} entries)'
+                    : 'Không có kết quả để lưu');
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.history,
+                  color: AppColors.secondary, size: 18),
+              tooltip: 'Xem History',
+              onPressed: () => _showHistorySheet(SnapshotType.shipping),
+            ),
+            IconButton(
               icon: const Icon(Icons.delete_outline,
                   color: AppColors.error, size: 18),
               tooltip: 'Xóa',
@@ -1138,12 +1218,290 @@ class _OtherScreenState extends State<OtherScreen>
     );
   }
 
-  void _copyShippingCsv(List<ShippingEntry> rows) {
+  String _buildShippingCsv(List<ShippingEntry> rows) {
     final lines = ['Email,送り状番号,お届け先,注文番号,配送確認リンク'];
     for (final r in rows) {
       lines.add('${_csvField(r.accountEmail)},${_csvField(r.trackingNumDisplay)},${_csvField(r.deliveryInfo)},${_csvField(r.orderNum)},${_csvField(r.trackingLink)}');
     }
-    Clipboard.setData(ClipboardData(text: lines.join('\n')));
+    return lines.join('\r\n');
+  }
+
+  void _copyShippingCsv(List<ShippingEntry> rows) {
+    Clipboard.setData(ClipboardData(text: _buildShippingCsv(rows)));
     _snack('Đã copy ${rows.length} dòng CSV');
+  }
+
+  Future<void> _exportShippingCsvFile(List<ShippingEntry> rows) async {
+    final csv = _buildShippingCsv(rows);
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-').substring(0, 19);
+    final file = File('${Directory.systemTemp.path}/shipping_$ts.csv');
+    const bom = [0xEF, 0xBB, 0xBF];
+    await file.writeAsBytes([...bom, ...utf8.encode(csv)]);
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'text/csv; charset=utf-8')],
+      subject: 'Shipping $ts',
+    );
+  }
+
+  // ─── History (snapshots) ─────────────────────────────────────────────────
+
+  void _showHistorySheet(SnapshotType type) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _HistorySheet(
+        type: type,
+        downloadSnapshot: _downloadSnapshot,
+      ),
+    );
+  }
+
+  Future<void> _downloadSnapshot(ResultSnapshot s) async {
+    final ts = s.createdAt.toIso8601String().replaceAll(':', '-').substring(0, 19);
+    final typeStr = s.type.name;
+    final csv = _buildSnapshotCsv(s);
+    final file = File('${Directory.systemTemp.path}/${typeStr}_snapshot_$ts.csv');
+    const bom = [0xEF, 0xBB, 0xBF];
+    await file.writeAsBytes([...bom, ...utf8.encode(csv)]);
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'text/csv; charset=utf-8')],
+      subject: '${typeStr} snapshot ${s.keyword.isEmpty ? "(all)" : s.keyword}',
+    );
+  }
+
+  String _buildSnapshotCsv(ResultSnapshot s) {
+    String f(dynamic v) => _csvField((v ?? '').toString());
+    final lines = <String>[];
+    switch (s.type) {
+      case SnapshotType.lottery:
+        lines.add('Email,商品名,日時,結果');
+        for (final e in s.entries) {
+          lines.add([f(e['accountEmail']), f(e['productTitle']), f(e['time']), f(e['result'])].join(','));
+        }
+        break;
+      case SnapshotType.order:
+        lines.add('Email,商品名,注文番号,時間,ステータス');
+        for (final e in s.entries) {
+          lines.add([f(e['accountEmail']), f(e['productTitle']), f(e['orderNum']), f(e['time']), f(e['status'])].join(','));
+        }
+        break;
+      case SnapshotType.shipping:
+        lines.add('Email,送り状番号,お届け先,注文番号,配送確認リンク');
+        for (final e in s.entries) {
+          lines.add([f(e['accountEmail']), f(e['trackingNumDisplay']), f(e['deliveryInfo']), f(e['orderNum']), f(e['trackingLink'])].join(','));
+        }
+        break;
+    }
+    return lines.join('\r\n');
+  }
+}
+
+class _HistorySheet extends StatefulWidget {
+  final SnapshotType type;
+  final Future<void> Function(ResultSnapshot) downloadSnapshot;
+  const _HistorySheet({required this.type, required this.downloadSnapshot});
+
+  @override
+  State<_HistorySheet> createState() => _HistorySheetState();
+}
+
+class _HistorySheetState extends State<_HistorySheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  String _typeLabel() {
+    switch (widget.type) {
+      case SnapshotType.lottery: return 'Lottery';
+      case SnapshotType.order: return 'Order';
+      case SnapshotType.shipping: return 'Shipping';
+    }
+  }
+
+  String _formatTime(DateTime t) {
+    final two = (int n) => n.toString().padLeft(2, '0');
+    return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AppProvider>(
+      builder: (ctx, p, _) {
+        final q = _searchCtrl.text.trim().toLowerCase();
+        final all = p.snapshotsByType(widget.type);
+        final filtered = q.isEmpty
+            ? all
+            : all.where((s) => s.keyword.toLowerCase().contains(q)).toList();
+        return DraggableScrollableSheet(
+          initialChildSize: 0.85,
+          minChildSize: 0.4,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (_, scrollCtrl) => Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.history, color: AppColors.secondary, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_typeLabel()} History (${all.length})',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
+                    ),
+                    const Spacer(),
+                    if (all.isNotEmpty)
+                      TextButton.icon(
+                        icon: const Icon(Icons.delete_sweep,
+                            color: AppColors.error, size: 18),
+                        label: const Text('Clear all',
+                            style: TextStyle(color: AppColors.error, fontSize: 12)),
+                        onPressed: () async {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (_) => AlertDialog(
+                              backgroundColor: AppColors.card,
+                              title: const Text('Xóa tất cả snapshot?',
+                                  style: TextStyle(color: Colors.white)),
+                              content: Text(
+                                  'Sẽ xóa ${all.length} snapshot ${_typeLabel()}. Không thể hoàn tác.',
+                                  style: const TextStyle(color: AppColors.textSecondary)),
+                              actions: [
+                                TextButton(
+                                    onPressed: () => Navigator.pop(context, false),
+                                    child: const Text('Hủy')),
+                                ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.error),
+                                    onPressed: () => Navigator.pop(context, true),
+                                    child: const Text('Xóa')),
+                              ],
+                            ),
+                          );
+                          if (ok == true) {
+                            await p.clearSnapshotsByType(widget.type);
+                          }
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextField(
+                  controller: _searchCtrl,
+                  onChanged: (_) => setState(() {}),
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Tìm theo keyword...',
+                    hintStyle: const TextStyle(
+                        color: AppColors.textSecondary, fontSize: 12),
+                    prefixIcon: const Icon(Icons.search,
+                        color: AppColors.textSecondary, size: 18),
+                    suffixIcon: _searchCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear,
+                                color: AppColors.textSecondary, size: 16),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              setState(() {});
+                            },
+                          )
+                        : null,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Expanded(
+                child: filtered.isEmpty
+                    ? Center(
+                        child: Text(
+                          all.isEmpty
+                              ? 'Chưa có snapshot nào'
+                              : 'Không khớp keyword "${_searchCtrl.text}"',
+                          style: const TextStyle(color: AppColors.textSecondary),
+                        ),
+                      )
+                    : ListView.separated(
+                        controller: scrollCtrl,
+                        padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 6),
+                        itemBuilder: (_, i) {
+                          final s = filtered[i];
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: AppColors.card,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppColors.divider),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _formatTime(s.createdAt),
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        s.keyword.isEmpty
+                                            ? '(no keyword)'
+                                            : '🔍 ${s.keyword}',
+                                        style: const TextStyle(
+                                            color: AppColors.textSecondary,
+                                            fontSize: 11),
+                                      ),
+                                      Text(
+                                        '${s.count} entries',
+                                        style: const TextStyle(
+                                            color: AppColors.secondary, fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.ios_share,
+                                      color: AppColors.accent, size: 20),
+                                  tooltip: 'Download CSV',
+                                  onPressed: () => widget.downloadSnapshot(s),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: AppColors.error, size: 20),
+                                  tooltip: 'Xóa',
+                                  onPressed: () => p.deleteSnapshot(s.id),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }

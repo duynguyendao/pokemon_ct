@@ -807,6 +807,79 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       }
     } catch(e) {}
 
+    // ── 31. Notification.permission — iOS Safari: 'default' ───────────────
+    try {
+      if (typeof Notification !== 'undefined') {
+        Object.defineProperty(Notification, 'permission', {
+          get: function() { return 'default'; },
+          configurable: true
+        });
+      }
+    } catch(e) {}
+
+    // ── 32. Hardware APIs Safari iOS does NOT have ───────────────────────
+    try {
+      var hwApis = ['bluetooth', 'usb', 'hid', 'serial'];
+      for (var hi = 0; hi < hwApis.length; hi++) {
+        try {
+          Object.defineProperty(navigator, hwApis[hi], {
+            get: function() { return undefined; },
+            configurable: true
+          });
+        } catch(e) {}
+      }
+    } catch(e) {}
+
+    // ── 33. navigator basics ─────────────────────────────────────────────
+    try {
+      Object.defineProperty(nav, 'cookieEnabled', { get: function() { return true; }, configurable: true });
+    } catch(e) {}
+    try {
+      Object.defineProperty(nav, 'doNotTrack', { get: function() { return null; }, configurable: true });
+    } catch(e) {}
+    try {
+      nav.javaEnabled = function() { return false; };
+      nativeStr(nav.javaEnabled, 'javaEnabled');
+    } catch(e) {}
+
+    // ── 34. OfflineAudioContext noise (parallel với AudioContext) ────────
+    try {
+      var Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (Off) {
+        var origGetChannelData = AudioBuffer.prototype.getChannelData;
+        AudioBuffer.prototype.getChannelData = function() {
+          var data = origGetChannelData.apply(this, arguments);
+          // Apply same noise pattern (per-arguments, deterministic per-session)
+          var noise = (window._fpAudioNoise = window._fpAudioNoise || (Math.random() * 0.0000001));
+          for (var i = 0; i < data.length; i += 100) {
+            data[i] = data[i] + noise;
+          }
+          return data;
+        };
+        nativeStr(AudioBuffer.prototype.getChannelData, 'getChannelData');
+      }
+    } catch(e) {}
+
+    // ── 35. Date timezone offset stability (JST = -540) ──────────────────
+    try {
+      var origTZ = Date.prototype.getTimezoneOffset;
+      Date.prototype.getTimezoneOffset = function() { return -540; };
+      nativeStr(Date.prototype.getTimezoneOffset, 'getTimezoneOffset');
+    } catch(e) {}
+
+    // ── 36. screen.availLeft / availTop — iOS Safari: 0 ──────────────────
+    try {
+      Object.defineProperty(screen, 'availLeft', { get: function() { return 0; }, configurable: true });
+      Object.defineProperty(screen, 'availTop', { get: function() { return 0; }, configurable: true });
+    } catch(e) {}
+
+    // ── 37. PointerEvent existence — iOS Safari has it ───────────────────
+    try {
+      if (typeof window.PointerEvent === 'undefined') {
+        window.PointerEvent = function() {};
+      }
+    } catch(e) {}
+
   } catch(e) {}
 })();
 ''';

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'dart:convert';
+import 'dart:io';
 import '../models/account.dart';
+import '../models/result_snapshot.dart';
 import '../models/start_all_report.dart';
 import '../providers/app_provider.dart';
 import '../services/shortcut_service.dart';
@@ -362,6 +365,10 @@ class _HomeScreenState extends State<HomeScreen>
         results: _currentReport.results,
       );
       setState(() => _runningAll = false);
+      // Auto-save snapshots for any result type that has data
+      await p.saveSnapshotFromCurrentResults(SnapshotType.lottery);
+      await p.saveSnapshotFromCurrentResults(SnapshotType.order);
+      await p.saveSnapshotFromCurrentResults(SnapshotType.shipping);
       _showStartAllReport();
     }
   }
@@ -423,15 +430,11 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              Share.share(_currentReport.toTxt());
-            },
+            onPressed: () => _shareReportFile('txt'),
             child: const Text('Share TXT'),
           ),
           TextButton(
-            onPressed: () {
-              Share.share(_currentReport.toCsv());
-            },
+            onPressed: () => _shareReportFile('csv'),
             child: const Text('Share CSV'),
           ),
           ElevatedButton(
@@ -441,6 +444,18 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
     );
+  }
+
+  Future<void> _shareReportFile(String format) async {
+    final isCsv = format == 'csv';
+    final content = isCsv ? _currentReport.toCsv() : _currentReport.toTxt();
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-').substring(0, 19);
+    final ext = isCsv ? 'csv' : 'txt';
+    final mime = isCsv ? 'text/csv; charset=utf-8' : 'text/plain; charset=utf-8';
+    final file = File('${Directory.systemTemp.path}/start_all_report_$ts.$ext');
+    final bom = isCsv ? [0xEF, 0xBB, 0xBF] : <int>[];
+    await file.writeAsBytes([...bom, ...utf8.encode(content)]);
+    await Share.shareXFiles([XFile(file.path, mimeType: mime)]);
   }
 
   void _showGlobalModeDialog(BuildContext ctx, AppProvider p) {

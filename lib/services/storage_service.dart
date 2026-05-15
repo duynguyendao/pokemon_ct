@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/account.dart';
 import '../models/proxy.dart';
 import '../models/filter_rule.dart';
+import '../models/result_snapshot.dart';
 
 class StorageService {
   static const _accountsKey = 'accounts';
@@ -22,6 +23,7 @@ class StorageService {
   static const _typingMinDelayKey = 'typingMinDelay';
   static const _typingMaxDelayKey = 'typingMaxDelay';
   static const _otpWatchdogSecondsKey = 'otpWatchdogSeconds';
+  static const _snapshotsKey = 'resultSnapshots';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -241,6 +243,28 @@ class StorageService {
   Future<void> saveUrlConfig(Map<String, String> config) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_urlConfigKey, jsonEncode(config));
+  }
+
+  Future<List<ResultSnapshot>> loadSnapshots() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_snapshotsKey);
+    if (raw == null) return [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return list
+          .map((e) => ResultSnapshot.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveSnapshots(List<ResultSnapshot> snapshots) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _snapshotsKey,
+      jsonEncode(snapshots.map((s) => s.toJson()).toList()),
+    );
   }
 
   Map<String, String> _defaultUrlConfig() => {
