@@ -4,6 +4,10 @@ import '../models/account.dart';
 import '../models/proxy.dart';
 import '../models/filter_rule.dart';
 import '../models/result_snapshot.dart';
+import '../models/lottery_result_entry.dart';
+import '../models/lottery_apply_entry.dart';
+import '../models/order_status_entry.dart';
+import '../models/shipping_entry.dart';
 
 class StorageService {
   static const _accountsKey = 'accounts';
@@ -24,6 +28,10 @@ class StorageService {
   static const _typingMaxDelayKey = 'typingMaxDelay';
   static const _otpWatchdogSecondsKey = 'otpWatchdogSeconds';
   static const _snapshotsKey = 'resultSnapshots';
+  static const _lotteryResultsKey = 'lotteryResults';
+  static const _orderStatusResultsKey = 'orderStatusResults';
+  static const _shippingResultsKey = 'shippingResults';
+  static const _lotteryApplyResultsKey = 'lotteryApplyResults';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -264,6 +272,90 @@ class StorageService {
     await prefs.setString(
       _snapshotsKey,
       jsonEncode(snapshots.map((s) => s.toJson()).toList()),
+    );
+  }
+
+  Future<List<LotteryResultEntry>> loadLotteryResults() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_lotteryResultsKey);
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List)
+          .map((e) => LotteryResultEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveLotteryResults(List<LotteryResultEntry> rows) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _lotteryResultsKey,
+      jsonEncode(rows.map((e) => e.toJson()).toList()),
+    );
+  }
+
+  Future<List<OrderStatusEntry>> loadOrderStatusResults() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_orderStatusResultsKey);
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List)
+          .map((e) => OrderStatusEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveOrderStatusResults(List<OrderStatusEntry> rows) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _orderStatusResultsKey,
+      jsonEncode(rows.map((e) => e.toJson()).toList()),
+    );
+  }
+
+  Future<List<ShippingEntry>> loadShippingResults() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_shippingResultsKey);
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List)
+          .map((e) => ShippingEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveShippingResults(List<ShippingEntry> rows) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _shippingResultsKey,
+      jsonEncode(rows.map((e) => e.toJson()).toList()),
+    );
+  }
+
+  Future<List<LotteryApplyEntry>> loadLotteryApplyResults() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_lotteryApplyResultsKey);
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List)
+          .map((e) => LotteryApplyEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveLotteryApplyResults(List<LotteryApplyEntry> rows) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _lotteryApplyResultsKey,
+      jsonEncode(rows.map((e) => e.toJson()).toList()),
     );
   }
 

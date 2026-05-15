@@ -1014,6 +1014,28 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
             IconButton(
+              icon: Icon(
+                _selected.length == filtered.length && filtered.isNotEmpty
+                    ? Icons.deselect
+                    : Icons.select_all,
+                color: AppColors.accent,
+              ),
+              tooltip: _selected.length == filtered.length && filtered.isNotEmpty
+                  ? 'Bỏ chọn tất cả'
+                  : 'Chọn tất cả (đang lọc)',
+              onPressed: () {
+                setState(() {
+                  final ids = filtered.map((a) => a.id).toSet();
+                  if (_selected.containsAll(ids) && ids.isNotEmpty) {
+                    // All filtered are selected → deselect them
+                    _selected.removeAll(ids);
+                  } else {
+                    _selected.addAll(ids);
+                  }
+                });
+              },
+            ),
+            IconButton(
               icon: const Icon(Icons.check_circle_outline, color: AppColors.done),
               tooltip: 'Đánh dấu Xong',
               onPressed: _selected.isEmpty

@@ -23,4 +23,11 @@ class LotteryApplyEntry {
         'time': time,
         'status': status,
       };
+
+  factory LotteryApplyEntry.fromJson(Map<String, dynamic> j) => LotteryApplyEntry(
+        accountEmail: j['accountEmail'] as String? ?? '',
+        productTitle: j['productTitle'] as String? ?? '',
+        time: j['time'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+      );
 }

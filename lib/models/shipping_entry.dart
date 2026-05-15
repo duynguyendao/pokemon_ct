@@ -31,4 +31,15 @@ class ShippingEntry {
         'deliveryInfo': deliveryInfo,
         'time': time,
       };
+
+  factory ShippingEntry.fromJson(Map<String, dynamic> j) => ShippingEntry(
+        accountEmail: j['accountEmail'] as String? ?? '',
+        orderNum: j['orderNum'] as String? ?? '',
+        productTitle: j['productTitle'] as String? ?? '',
+        trackingNumDisplay: j['trackingNumDisplay'] as String? ?? '',
+        trackingNum: j['trackingNum'] as String? ?? '',
+        trackingLink: j['trackingLink'] as String? ?? '',
+        deliveryInfo: j['deliveryInfo'] as String? ?? '',
+        time: j['time'] as String? ?? '',
+      );
 }

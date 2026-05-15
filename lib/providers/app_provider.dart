@@ -131,6 +131,10 @@ class AppProvider extends ChangeNotifier {
     _typingMaxDelay = await _storage.loadTypingMaxDelay();
     _otpWatchdogSeconds = await _storage.loadOtpWatchdogSeconds();
     _snapshots = await _storage.loadSnapshots();
+    _lotteryResults.addAll(await _storage.loadLotteryResults());
+    _orderStatusResults.addAll(await _storage.loadOrderStatusResults());
+    _shippingResults.addAll(await _storage.loadShippingResults());
+    _lotteryApplyResults.addAll(await _storage.loadLotteryApplyResults());
     _loaded = true;
     _setupOtpStream();
     notifyListeners();
@@ -340,44 +344,52 @@ class AppProvider extends ChangeNotifier {
   void addLotteryResult(LotteryResultEntry entry) {
     _lotteryResults.removeWhere((e) => e.accountEmail == entry.accountEmail);
     _lotteryResults.add(entry);
+    unawaited(_storage.saveLotteryResults(_lotteryResults));
     notifyListeners();
   }
 
   void clearLotteryResults() {
     _lotteryResults.clear();
+    unawaited(_storage.saveLotteryResults(_lotteryResults));
     notifyListeners();
   }
 
   void addOrderStatusResult(OrderStatusEntry entry) {
     _orderStatusResults.removeWhere((e) => e.accountEmail == entry.accountEmail);
     _orderStatusResults.add(entry);
+    unawaited(_storage.saveOrderStatusResults(_orderStatusResults));
     notifyListeners();
   }
 
   void clearOrderStatusResults() {
     _orderStatusResults.clear();
+    unawaited(_storage.saveOrderStatusResults(_orderStatusResults));
     notifyListeners();
   }
 
   void addShippingResult(ShippingEntry entry) {
     _shippingResults.removeWhere((e) => e.accountEmail == entry.accountEmail);
     _shippingResults.add(entry);
+    unawaited(_storage.saveShippingResults(_shippingResults));
     notifyListeners();
   }
 
   void clearShippingResults() {
     _shippingResults.clear();
+    unawaited(_storage.saveShippingResults(_shippingResults));
     notifyListeners();
   }
 
   void addLotteryApplyResult(LotteryApplyEntry entry) {
     _lotteryApplyResults.removeWhere((e) => e.accountEmail == entry.accountEmail);
     _lotteryApplyResults.add(entry);
+    unawaited(_storage.saveLotteryApplyResults(_lotteryApplyResults));
     notifyListeners();
   }
 
   void clearLotteryApplyResults() {
     _lotteryApplyResults.clear();
+    unawaited(_storage.saveLotteryApplyResults(_lotteryApplyResults));
     notifyListeners();
   }
 

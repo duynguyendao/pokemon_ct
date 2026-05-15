@@ -26,4 +26,12 @@ class OrderStatusEntry {
         'status': status,
         'time': time,
       };
+
+  factory OrderStatusEntry.fromJson(Map<String, dynamic> j) => OrderStatusEntry(
+        accountEmail: j['accountEmail'] as String? ?? '',
+        productTitle: j['productTitle'] as String? ?? '',
+        orderNum: j['orderNum'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+        time: j['time'] as String? ?? '',
+      );
 }

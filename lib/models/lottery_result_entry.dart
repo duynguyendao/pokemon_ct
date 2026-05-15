@@ -22,4 +22,11 @@ class LotteryResultEntry {
         'time': time,
         'result': result,
       };
+
+  factory LotteryResultEntry.fromJson(Map<String, dynamic> j) => LotteryResultEntry(
+        accountEmail: j['accountEmail'] as String? ?? '',
+        productTitle: j['productTitle'] as String? ?? '',
+        time: j['time'] as String? ?? '',
+        result: j['result'] as String? ?? '未定',
+      );
 }
