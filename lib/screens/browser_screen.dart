@@ -222,6 +222,90 @@ class _BrowserScreenState extends State<BrowserScreen> {
       .replaceAll('\n', '\\n')
       .replaceAll('\r', '\\r');
 
+  // Poll DOM until the Vue-rendered lottery list is fully ready.
+  // Returns: {step:'waitReady', ok:true, count:N, accepting:M} or {ok:false, reason}
+  // Checks (in order):
+  //   1) <ul class="comOrderList"> exists
+  //   2) >= 1 <li> children rendered
+  //   3) At least one <li> has .acceptBox (status box rendered)
+  //   4) At least one <li> has product name text (.lBox p OR .waresUl .name)
+  //   5) Item count stable across two consecutive polls (Vue done rendering)
+  static const String _lotteryWaitListReadyJs = '''
+(function() {
+  function postMsg(o) { window._wk.postMessage(JSON.stringify(o)); }
+  var startTs = Date.now();
+  var MAX_MS = 20000;
+  var POLL_MS = 300;
+  var lastCount = -1;
+  var stableHits = 0;
+  function check() {
+    var list = document.querySelector('.comOrderList');
+    if (!list) {
+      // Container chưa xuất hiện
+      if (Date.now() - startTs > MAX_MS) {
+        postMsg({type:'lotteryApply', step:'waitReady', ok:false, reason:'no-container'});
+        return;
+      }
+      setTimeout(check, POLL_MS); return;
+    }
+    var items = list.querySelectorAll(':scope > li');
+    if (items.length === 0) {
+      if (Date.now() - startTs > MAX_MS) {
+        postMsg({type:'lotteryApply', step:'waitReady', ok:false, reason:'no-items'});
+        return;
+      }
+      setTimeout(check, POLL_MS); return;
+    }
+    // Verify content rendered in items
+    var hasAcceptBox = false;
+    var hasName = false;
+    var acceptingCount = 0;
+    for (var i = 0; i < items.length; i++) {
+      var li = items[i];
+      var ab = li.querySelector('.acceptBox');
+      if (ab) {
+        hasAcceptBox = true;
+        if (ab.classList.contains('accepting')) acceptingCount++;
+        else {
+          var ttl = ab.querySelector('.ttl');
+          if (ttl && ttl.textContent.indexOf('受付中') >= 0) acceptingCount++;
+        }
+      }
+      var nameEl = li.querySelector('.lBox p, .waresUl .name');
+      if (nameEl && nameEl.textContent.trim().length > 0) hasName = true;
+    }
+    if (!hasAcceptBox || !hasName) {
+      if (Date.now() - startTs > MAX_MS) {
+        postMsg({type:'lotteryApply', step:'waitReady', ok:false,
+                 reason:'partial-render', count:items.length});
+        return;
+      }
+      setTimeout(check, POLL_MS); return;
+    }
+    // Stability check — item count must stay same for 2 consecutive polls
+    if (items.length === lastCount) {
+      stableHits++;
+      if (stableHits >= 2) {
+        postMsg({type:'lotteryApply', step:'waitReady', ok:true,
+                 count:items.length, accepting:acceptingCount});
+        return;
+      }
+    } else {
+      lastCount = items.length;
+      stableHits = 0;
+    }
+    if (Date.now() - startTs > MAX_MS) {
+      // Timeout — vẫn return ok với data hiện tại (đã có item + content)
+      postMsg({type:'lotteryApply', step:'waitReady', ok:true,
+               count:items.length, accepting:acceptingCount, note:'timeout-stable'});
+      return;
+    }
+    setTimeout(check, POLL_MS);
+  }
+  check();
+})();
+''';
+
   // Find a 受付中 item matching keyword and expand 詳しく見る.
   // Returns: {step:'expand', ok:true|false, reason, title, lotteryId, hasRadio}
   // - keyword empty → take first 受付中 item
@@ -1651,11 +1735,33 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final email = widget.account.email;
     final keyword = provider.targetProductName;
 
-    _setStatus('🎲 Đang tìm lottery để apply...');
+    _setStatus('⏳ Đang chờ trang lottery load xong...');
 
-    await Future.delayed(const Duration(milliseconds: 800));
-    await _waitForElement(['.comOrderList', '.comOrderList > li'], timeout: 8000);
-    await Future.delayed(const Duration(milliseconds: 500));
+    // Vue.js render bất đồng bộ — chờ container + items + acceptBox + name
+    // đều render xong (stability check 2 polls liên tiếp).
+    await Future.delayed(const Duration(milliseconds: 600));
+    final waitResult = await _runLotteryStep(
+      _lotteryWaitListReadyJs,
+      timeout: const Duration(seconds: 25),
+    );
+    if (waitResult == null) {
+      _recordApplyError(provider, email, keyword, 'タイムアウト (wait list)');
+      await _finishApply();
+      return;
+    }
+    if (waitResult['ok'] != true) {
+      final reason = waitResult['reason'] as String? ?? '';
+      _recordApplyError(provider, email, keyword, 'list-not-ready: $reason');
+      await _finishApply();
+      return;
+    }
+
+    final itemCount = waitResult['count'] as int? ?? 0;
+    final acceptingCount = waitResult['accepting'] as int? ?? 0;
+    _setStatus('🎲 Tìm lottery ($itemCount items, $acceptingCount 受付中)...');
+
+    // Settle delay sau khi list ready — cho Vue reactivity ổn định hoàn toàn
+    await Future.delayed(const Duration(milliseconds: 700));
 
     // Step 1: Find matching 受付中 item + expand 詳しく見る
     final expandResult = await _runLotteryStep(_lotteryFindAndExpandJs(keyword));
