@@ -222,6 +222,29 @@ class _BrowserScreenState extends State<BrowserScreen> {
       .replaceAll('\n', '\\n')
       .replaceAll('\r', '\\r');
 
+  // Wait until document.readyState === 'complete' (all resources loaded).
+  // Returns: {step:'pageReady', ok:true} or {ok:false, reason:'timeout'}
+  static const String _waitPageCompleteJs = '''
+(function() {
+  function postMsg(o) { window._wk.postMessage(JSON.stringify(o)); }
+  var startTs = Date.now();
+  var MAX_MS = 15000;
+  function check() {
+    if (document.readyState === 'complete') {
+      postMsg({type:'lotteryApply', step:'pageReady', ok:true});
+      return;
+    }
+    if (Date.now() - startTs > MAX_MS) {
+      postMsg({type:'lotteryApply', step:'pageReady', ok:false, reason:'timeout',
+               state: document.readyState});
+      return;
+    }
+    setTimeout(check, 250);
+  }
+  check();
+})();
+''';
+
   // Poll DOM until the Vue-rendered lottery list is fully ready.
   // Returns: {step:'waitReady', ok:true, count:N, accepting:M} or {ok:false, reason}
   // Checks (in order):
@@ -1732,11 +1755,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final email = widget.account.email;
     final keyword = provider.targetProductName;
 
-    _setStatus('⏳ Đang chờ trang lottery load xong...');
+    // Step A: Đợi document.readyState === 'complete' (toàn bộ tài nguyên load xong)
+    _setStatus('⏳ Đợi trang lottery load xong...');
+    final pageReadyResult = await _runLotteryStep(
+      _waitPageCompleteJs,
+      timeout: const Duration(seconds: 18),
+    );
+    if (pageReadyResult == null || pageReadyResult['ok'] != true) {
+      final state = pageReadyResult?['state'] as String? ?? 'unknown';
+      _recordApplyError(provider, email, keyword, 'page-not-loaded (state=$state)');
+      await _finishApply();
+      return;
+    }
 
-    // Vue.js render bất đồng bộ — chờ container + items + acceptBox + name
-    // đều render xong (stability check 2 polls liên tiếp).
-    await Future.delayed(const Duration(milliseconds: 600));
+    // Step B: Đợi 2 giây buffer cho Vue mount + API gọi xong + render
+    _setStatus('⏳ Trang đã load — đợi 2s cho Vue render...');
+    await Future.delayed(const Duration(seconds: 2));
+
+    // Step C: Poll DOM cho đến khi list (container + items + acceptBox + name) ready
     final waitResult = await _runLotteryStep(
       _lotteryWaitListReadyJs,
       timeout: const Duration(seconds: 25),
@@ -1757,8 +1793,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final acceptingCount = waitResult['accepting'] as int? ?? 0;
     _setStatus('🎲 Tìm lottery ($itemCount items, $acceptingCount 受付中)...');
 
-    // Settle delay sau khi list ready — cho Vue reactivity ổn định hoàn toàn
-    await Future.delayed(const Duration(milliseconds: 700));
+    // Step D: Settle delay 1s cuối cho Vue reactivity ổn định hoàn toàn trước khi click
+    await Future.delayed(const Duration(seconds: 1));
 
     // Step 1: Find matching 受付中 item + expand 詳しく見る
     final expandResult = await _runLotteryStep(_lotteryFindAndExpandJs(keyword));
