@@ -1,6 +1,6 @@
 import 'package:uuid/uuid.dart';
 
-enum SnapshotType { lottery, order, shipping }
+enum SnapshotType { lottery, order, shipping, lotteryApply }
 
 extension SnapshotTypeExt on SnapshotType {
   String get label {
@@ -8,6 +8,7 @@ extension SnapshotTypeExt on SnapshotType {
       case SnapshotType.lottery: return 'Lottery';
       case SnapshotType.order: return 'Order';
       case SnapshotType.shipping: return 'Shipping';
+      case SnapshotType.lotteryApply: return 'Lottery Apply';
     }
   }
 
@@ -15,6 +16,7 @@ extension SnapshotTypeExt on SnapshotType {
     switch (v) {
       case 'order': return SnapshotType.order;
       case 'shipping': return SnapshotType.shipping;
+      case 'lotteryApply': return SnapshotType.lotteryApply;
       default: return SnapshotType.lottery;
     }
   }

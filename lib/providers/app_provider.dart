@@ -4,6 +4,7 @@ import '../models/account.dart';
 import '../models/proxy.dart';
 import '../models/otp_entry.dart';
 import '../models/filter_rule.dart';
+import '../models/lottery_apply_entry.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
 import '../models/result_snapshot.dart';
@@ -37,6 +38,7 @@ class AppProvider extends ChangeNotifier {
   final List<LotteryResultEntry> _lotteryResults = [];
   final List<OrderStatusEntry> _orderStatusResults = [];
   final List<ShippingEntry> _shippingResults = [];
+  final List<LotteryApplyEntry> _lotteryApplyResults = [];
   List<ResultSnapshot> _snapshots = [];
   static const int _maxSnapshots = 100;
   bool _loaded = false;
@@ -81,6 +83,7 @@ class AppProvider extends ChangeNotifier {
   List<LotteryResultEntry> get lotteryResults => List.unmodifiable(_lotteryResults);
   List<OrderStatusEntry> get orderStatusResults => List.unmodifiable(_orderStatusResults);
   List<ShippingEntry> get shippingResults => List.unmodifiable(_shippingResults);
+  List<LotteryApplyEntry> get lotteryApplyResults => List.unmodifiable(_lotteryApplyResults);
   List<ResultSnapshot> get snapshots => List.unmodifiable(_snapshots);
   List<ResultSnapshot> snapshotsByType(SnapshotType type) =>
       _snapshots.where((s) => s.type == type).toList()
@@ -367,6 +370,17 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void addLotteryApplyResult(LotteryApplyEntry entry) {
+    _lotteryApplyResults.removeWhere((e) => e.accountEmail == entry.accountEmail);
+    _lotteryApplyResults.add(entry);
+    notifyListeners();
+  }
+
+  void clearLotteryApplyResults() {
+    _lotteryApplyResults.clear();
+    notifyListeners();
+  }
+
   // --- Result snapshots (history, max 100, persisted) ---
 
   Future<ResultSnapshot?> saveSnapshotFromCurrentResults(
@@ -387,6 +401,10 @@ class AppProvider extends ChangeNotifier {
       case SnapshotType.shipping:
         if (_shippingResults.isEmpty) return null;
         entries = _shippingResults.map((e) => e.toJson()).toList();
+        break;
+      case SnapshotType.lotteryApply:
+        if (_lotteryApplyResults.isEmpty) return null;
+        entries = _lotteryApplyResults.map((e) => e.toJson()).toList();
         break;
     }
     final snapshot = ResultSnapshot(

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../models/lottery_apply_entry.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
 import '../models/result_snapshot.dart';
@@ -176,6 +177,10 @@ class _OtherScreenState extends State<OtherScreen>
               _buildKeywordCard(p),
               const SizedBox(height: 16),
               if (all.isNotEmpty) _buildResultsSection(p, all, rows),
+              if (p.lotteryApplyResults.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                _buildLotteryApplySection(p),
+              ],
             ],
           ),
         );
@@ -1295,8 +1300,177 @@ class _OtherScreenState extends State<OtherScreen>
           lines.add([f(e['accountEmail']), f(e['trackingNumDisplay']), f(e['deliveryInfo']), f(e['orderNum']), f(e['trackingLink'])].join(','));
         }
         break;
+      case SnapshotType.lotteryApply:
+        lines.add('Email,商品名,日時,応募結果');
+        for (final e in s.entries) {
+          lines.add([f(e['accountEmail']), f(e['productTitle']), f(e['time']), f(e['status'])].join(','));
+        }
+        break;
     }
     return lines.join('\r\n');
+  }
+
+  // ─── Lottery Apply section ─────────────────────────────────────────────
+
+  Widget _buildLotteryApplySection(AppProvider p) {
+    final rows = p.lotteryApplyResults;
+    final success = rows.where((e) => e.isSuccess).length;
+    final failed = rows.where((e) => e.isFailed).length;
+    final closed = rows.where((e) => e.isClosed).length;
+    final err = rows.where((e) => e.isError).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text('🎲 Lottery Apply',
+                style: TextStyle(
+                    color: AppColors.accent,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14)),
+            const SizedBox(width: 8),
+            if (success > 0) _chip('成功 $success', AppColors.done),
+            const SizedBox(width: 4),
+            if (failed > 0) _chip('失敗 $failed', AppColors.error),
+            const SizedBox(width: 4),
+            if (closed > 0) _chip('終了 $closed', Colors.grey),
+            const SizedBox(width: 4),
+            if (err > 0) _chip('エラー $err', AppColors.warning),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.copy_all,
+                  color: AppColors.textSecondary, size: 18),
+              tooltip: 'Copy CSV',
+              onPressed: () => _copyLotteryApplyCsv(rows),
+            ),
+            IconButton(
+              icon: const Icon(Icons.ios_share,
+                  color: AppColors.accent, size: 18),
+              tooltip: 'Export CSV file',
+              onPressed: () => _exportLotteryApplyCsvFile(rows),
+            ),
+            IconButton(
+              icon: const Icon(Icons.save_alt,
+                  color: AppColors.done, size: 18),
+              tooltip: 'Save snapshot',
+              onPressed: () async {
+                final s = await p.saveSnapshotFromCurrentResults(SnapshotType.lotteryApply);
+                _snack(s != null
+                    ? 'Đã lưu snapshot (${s.count} entries)'
+                    : 'Không có kết quả để lưu');
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.history,
+                  color: AppColors.secondary, size: 18),
+              tooltip: 'Xem History',
+              onPressed: () => _showHistorySheet(SnapshotType.lotteryApply),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: AppColors.error, size: 18),
+              tooltip: 'Xóa',
+              onPressed: () => p.clearLotteryApplyResults(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.accent.withAlpha(60)),
+          ),
+          child: Column(
+            children: rows.asMap().entries.map((e) => Column(
+              children: [
+                if (e.key > 0) const Divider(height: 1, color: AppColors.divider),
+                _buildLotteryApplyRow(e.value),
+              ],
+            )).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLotteryApplyRow(LotteryApplyEntry e) {
+    Color statusColor;
+    if (e.isSuccess) {
+      statusColor = AppColors.done;
+    } else if (e.isClosed) {
+      statusColor = Colors.grey;
+    } else if (e.isError || e.isFailed) {
+      statusColor = AppColors.error;
+    } else {
+      statusColor = AppColors.warning;
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(e.accountEmail,
+                style: const TextStyle(color: Colors.white, fontSize: 11),
+                overflow: TextOverflow.ellipsis),
+          ),
+          Expanded(
+            flex: 4,
+            child: Text(e.productTitle.isEmpty ? '—' : e.productTitle,
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                overflow: TextOverflow.ellipsis, maxLines: 2),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(e.time.isEmpty ? '—' : e.time,
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 10),
+                overflow: TextOverflow.ellipsis),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: statusColor.withAlpha(30),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: statusColor.withAlpha(120)),
+            ),
+            child: Text(e.status,
+                style: TextStyle(
+                    color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _buildLotteryApplyCsv(List<LotteryApplyEntry> rows) {
+    final lines = ['Email,商品名,日時,応募結果'];
+    for (final r in rows) {
+      lines.add([
+        _csvField(r.accountEmail),
+        _csvField(r.productTitle),
+        _csvField(r.time),
+        _csvField(r.status),
+      ].join(','));
+    }
+    return lines.join('\r\n');
+  }
+
+  void _copyLotteryApplyCsv(List<LotteryApplyEntry> rows) {
+    Clipboard.setData(ClipboardData(text: _buildLotteryApplyCsv(rows)));
+    _snack('Đã copy ${rows.length} dòng CSV');
+  }
+
+  Future<void> _exportLotteryApplyCsvFile(List<LotteryApplyEntry> rows) async {
+    final csv = _buildLotteryApplyCsv(rows);
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-').substring(0, 19);
+    final file = File('${Directory.systemTemp.path}/lottery_apply_$ts.csv');
+    const bom = [0xEF, 0xBB, 0xBF];
+    await file.writeAsBytes([...bom, ...utf8.encode(csv)]);
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'text/csv; charset=utf-8')],
+      subject: 'Lottery Apply $ts',
+    );
   }
 }
 
@@ -1323,6 +1497,7 @@ class _HistorySheetState extends State<_HistorySheet> {
       case SnapshotType.lottery: return 'Lottery';
       case SnapshotType.order: return 'Order';
       case SnapshotType.shipping: return 'Shipping';
+      case SnapshotType.lotteryApply: return 'Lottery Apply';
     }
   }
 

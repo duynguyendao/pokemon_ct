@@ -284,9 +284,10 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       );
 
-      // Auto-mark done for task-completion modes (lotteryResult / orderStatus)
+      // Auto-mark done for task-completion modes (lottery apply / lotteryResult / orderStatus)
       if (mounted &&
-          (account.mode == AccountMode.lotteryResult ||
+          (account.mode == AccountMode.lottery ||
+              account.mode == AccountMode.lotteryResult ||
               account.mode == AccountMode.orderStatus)) {
         final current = p.accounts.firstWhere(
           (a) => a.id == account.id,
@@ -367,6 +368,7 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() => _runningAll = false);
       // Auto-save snapshots for any result type that has data
       await p.saveSnapshotFromCurrentResults(SnapshotType.lottery);
+      await p.saveSnapshotFromCurrentResults(SnapshotType.lotteryApply);
       await p.saveSnapshotFromCurrentResults(SnapshotType.order);
       await p.saveSnapshotFromCurrentResults(SnapshotType.shipping);
       _showStartAllReport();

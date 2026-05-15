@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/account.dart';
+import '../models/lottery_apply_entry.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
 import '../models/otp_entry.dart';
@@ -80,6 +81,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _orderStatusChecked = false;
   bool _pendingOrderStatusNavigation = false;
   Completer<List<dynamic>>? _orderStatusCompleter;
+
+  // Lottery apply (lottery mode)
+  bool _lotteryApplied = false;
+  bool _pendingLotteryNavigation = false;
+  Completer<Map<String, dynamic>>? _lotteryApplyStepCompleter;
 
   // Human-like typing completer — resolves khi JS báo typeDone
   Completer<void>? _typeCompleter;
@@ -207,6 +213,190 @@ class _BrowserScreenState extends State<BrowserScreen> {
     });
   });
   window._wk.postMessage(JSON.stringify({type:'orderStatusResult',data:result}));
+})();
+''';
+
+  static String _jsEsc(String s) => s
+      .replaceAll('\\', '\\\\')
+      .replaceAll("'", "\\'")
+      .replaceAll('\n', '\\n')
+      .replaceAll('\r', '\\r');
+
+  // Find a 受付中 item matching keyword and expand 詳しく見る.
+  // Returns: {step:'expand', ok:true|false, reason, title, lotteryId, hasRadio}
+  // - keyword empty → take first 受付中 item
+  // - keyword non-empty → match title containing keyword (case-insensitive)
+  static String _lotteryFindAndExpandJs(String keyword) {
+    final kw = _jsEsc(keyword);
+    return '''
+(function() {
+  function postMsg(o) { window._wk.postMessage(JSON.stringify(o)); }
+  var lis = document.querySelectorAll('.comOrderList > li');
+  if (lis.length === 0) {
+    postMsg({type:'lotteryApply', step:'expand', ok:false, reason:'no-list'});
+    return;
+  }
+  var kw = '$kw'.toLowerCase();
+  var matched = null;
+  var hasAccepting = false;
+  for (var i = 0; i < lis.length; i++) {
+    var li = lis[i];
+    var acceptBox = li.querySelector('.acceptBox');
+    var isAccepting = acceptBox && acceptBox.classList.contains('accepting');
+    if (!isAccepting) {
+      // Also check via ttl text
+      var ttl = li.querySelector('.acceptBox .ttl');
+      isAccepting = ttl && ttl.textContent.indexOf('受付中') >= 0;
+    }
+    if (!isAccepting) continue;
+    hasAccepting = true;
+    var nameEl = li.querySelector('.lBox p, .waresUl .name');
+    var name = nameEl ? nameEl.textContent.trim() : '';
+    if (kw === '' || name.toLowerCase().indexOf(kw) >= 0) {
+      matched = { li: li, name: name };
+      break;
+    }
+  }
+  if (!matched) {
+    postMsg({type:'lotteryApply', step:'expand', ok:false,
+             reason: hasAccepting ? 'no-match' : 'no-accepting'});
+    return;
+  }
+  // Find lottery ID from checkbox id (e.g. L0000000059)
+  var cb = matched.li.querySelector('.checkboxWrapper input[type="checkbox"]');
+  var lotteryId = cb ? (cb.id || '') : '';
+  // Expand 詳しく見る — click the dt inside subDl
+  var dt = matched.li.querySelector('.subDl dt');
+  var dd = matched.li.querySelector('.subDl dd');
+  if (!dt) {
+    postMsg({type:'lotteryApply', step:'expand', ok:false, reason:'no-detail'});
+    return;
+  }
+  // Scroll into view first
+  try { matched.li.scrollIntoView({block:'center', behavior:'instant'}); } catch(e) {
+    try { matched.li.scrollIntoView(); } catch(e2) {}
+  }
+  // Click dt to trigger Vue handler
+  try { dt.click(); } catch(e) {}
+  // Force display:block on dd in case animation is slow
+  if (dd && dd.style.display === 'none') {
+    dd.style.display = 'block';
+  }
+  var radio = matched.li.querySelector('.mailForm input[type="radio"]');
+  postMsg({
+    type:'lotteryApply', step:'expand', ok:true,
+    title: matched.name, lotteryId: lotteryId,
+    hasRadio: !!radio
+  });
+})();
+''';
+  }
+
+  // Click radio + checkbox + 応募する link in expanded form
+  // Returns: {step:'submit', ok:true|false, reason}
+  static String _lotteryClickFormJs(String lotteryId) {
+    final id = _jsEsc(lotteryId);
+    return '''
+(function() {
+  function postMsg(o) { window._wk.postMessage(JSON.stringify(o)); }
+  var id = '$id';
+  var form = id ? document.querySelector('.mailForm.' + id) : document.querySelector('.mailForm');
+  if (!form) {
+    postMsg({type:'lotteryApply', step:'submit', ok:false, reason:'no-form'});
+    return;
+  }
+  // 1. Tick first radio
+  var radio = form.querySelector('input[type="radio"]');
+  if (radio) {
+    if (!radio.checked) {
+      try { radio.scrollIntoView({block:'center', behavior:'instant'}); } catch(e) {}
+      try { radio.click(); } catch(e) {}
+      // Force Vue reactivity
+      try {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch(e) {}
+    }
+  }
+  // 2. Tick consent checkbox
+  var checkbox = form.querySelector('.checkboxWrapper input[type="checkbox"]');
+  if (!checkbox) {
+    postMsg({type:'lotteryApply', step:'submit', ok:false, reason:'no-checkbox'});
+    return;
+  }
+  if (!checkbox.checked) {
+    try { checkbox.scrollIntoView({block:'center', behavior:'instant'}); } catch(e) {}
+    try { checkbox.click(); } catch(e) {}
+    try {
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch(e) {}
+  }
+  // 3. Click 応募する link (opens #pop01 popup)
+  var applyLink = form.querySelector('.linkList a.popup-modal[href*="#pop01"]') ||
+                  form.querySelector('.linkList a.popup-modal') ||
+                  form.querySelector('a[href*="#pop01"]');
+  if (!applyLink) {
+    postMsg({type:'lotteryApply', step:'submit', ok:false, reason:'no-apply-link'});
+    return;
+  }
+  try { applyLink.scrollIntoView({block:'center', behavior:'instant'}); } catch(e) {}
+  setTimeout(function() {
+    try { applyLink.click(); } catch(e) {}
+    postMsg({type:'lotteryApply', step:'submit', ok:true});
+  }, 300 + Math.floor(Math.random() * 200));
+})();
+''';
+  }
+
+  // Click confirm button inside #pop01 popup
+  // Returns: {step:'confirm', ok:true|false, reason}
+  static const String _lotteryConfirmJs = '''
+(function() {
+  function postMsg(o) { window._wk.postMessage(JSON.stringify(o)); }
+  var pop = document.getElementById('pop01');
+  if (!pop) {
+    postMsg({type:'lotteryApply', step:'confirm', ok:false, reason:'no-popup'});
+    return;
+  }
+  var btn = document.getElementById('applyBtn') || pop.querySelector('a[id="applyBtn"]');
+  if (!btn) {
+    btn = pop.querySelector('.linkUl li:first-child a');
+  }
+  if (!btn) {
+    postMsg({type:'lotteryApply', step:'confirm', ok:false, reason:'no-confirm-btn'});
+    return;
+  }
+  try { btn.scrollIntoView({block:'center', behavior:'instant'}); } catch(e) {}
+  setTimeout(function() {
+    try { btn.click(); } catch(e) {}
+    postMsg({type:'lotteryApply', step:'confirm', ok:true});
+  }, 400 + Math.floor(Math.random() * 300));
+})();
+''';
+
+  // Detect apply result page — looks for success text or remaining state
+  static const String _lotteryResultDetectJs = '''
+(function() {
+  function postMsg(o) { window._wk.postMessage(JSON.stringify(o)); }
+  var body = document.body ? document.body.textContent : '';
+  // Success keywords (応募完了 / 応募ありがとう / 応募を受け付け / お申し込みを受け付け)
+  var successKws = ['応募が完了', '応募を受け付', '応募完了', 'お申し込みを受け付', 'お申込みを受け付', 'ご応募ありがとう'];
+  for (var i = 0; i < successKws.length; i++) {
+    if (body.indexOf(successKws[i]) >= 0) {
+      postMsg({type:'lotteryApply', step:'result', ok:true, status:'success', matched:successKws[i]});
+      return;
+    }
+  }
+  // Failure keywords
+  var failKws = ['受付終了しました', '受付期間外', '応募できません', 'お申し込み期間外'];
+  for (var i = 0; i < failKws.length; i++) {
+    if (body.indexOf(failKws[i]) >= 0) {
+      postMsg({type:'lotteryApply', step:'result', ok:false, status:'closed', matched:failKws[i]});
+      return;
+    }
+  }
+  postMsg({type:'lotteryApply', step:'result', ok:false, status:'unknown'});
 })();
 ''';
 
@@ -491,7 +681,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _pageFreezeTimer = Timer(_pageFreezeDuration, () {
       if (!mounted) return;
       // Đang trong các flow đã extract xong → không recover (đã pop screen rồi)
-      if (_resultChecked || _orderStatusChecked) return;
+      if (_resultChecked || _orderStatusChecked || _lotteryApplied) return;
       // Đã đạt max captcha retries → skip
       if (_captchaRetryCount >= _maxCaptchaRetries) return;
       _setStatus('⏰ Trang đứng 30s — auto recover...');
@@ -556,6 +746,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
               if (widget.account.mode == AccountMode.orderStatus &&
                   !_orderStatusChecked) {
                 setState(() => _pendingOrderStatusNavigation = true);
+              }
+              // lottery mode: sau OTP thành công → navigate về trang lottery
+              if (widget.account.mode == AccountMode.lottery &&
+                  !_lotteryApplied) {
+                setState(() => _pendingLotteryNavigation = true);
               }
             }
             if (p.fakeBrowser) {
@@ -627,6 +822,20 @@ class _BrowserScreenState extends State<BrowserScreen> {
               }
             }
 
+            // Sau OTP thành công trong lottery mode → điều hướng đến trang lottery
+            if (_pendingLotteryNavigation &&
+                !_lotteryApplied &&
+                p.lotteryUrl.isNotEmpty) {
+              setState(() => _pendingLotteryNavigation = false);
+              final base = p.lotteryUrl.contains('?')
+                  ? p.lotteryUrl.split('?').first
+                  : p.lotteryUrl;
+              if (!url.startsWith(base)) {
+                unawaited(_controller.loadRequest(Uri.parse(p.lotteryUrl)));
+                return;
+              }
+            }
+
             // Block images nếu được bật
             if (p.blockImages && mounted) {
               unawaited(_controller.runJavaScript('''
@@ -681,6 +890,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
                         : p.orderHistoryUrl)) {
               _orderStatusChecked = true;
               unawaited(_performOrderStatusCheck());
+            }
+
+            // Trigger lottery apply khi đang ở trang lottery
+            if (mounted &&
+                widget.account.mode == AccountMode.lottery &&
+                !_lotteryApplied &&
+                p.lotteryUrl.isNotEmpty &&
+                url.startsWith(
+                    p.lotteryUrl.contains('?')
+                        ? p.lotteryUrl.split('?').first
+                        : p.lotteryUrl)) {
+              _lotteryApplied = true;
+              unawaited(_performLotteryApply());
             }
 
             // Dùng JS để phát hiện field OTP — không có 'body' fallback
@@ -837,6 +1059,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
       return;
     }
 
+    // Lottery apply step response
+    if (message.contains('"type":"lotteryApply"')) {
+      try {
+        final data = jsonDecode(message) as Map<String, dynamic>;
+        if (_lotteryApplyStepCompleter?.isCompleted == false) {
+          _lotteryApplyStepCompleter!.complete(data);
+        }
+      } catch (_) {}
+      return;
+    }
+
     // Shipping info extraction response (発送済み detail page)
     if (message.contains('"type":"shippingInfo"')) {
       try {
@@ -871,7 +1104,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     // reCAPTCHA / trang bị block → clear cookies + đổi UA + 5G + retry
     if (message.contains('"type":"captchaError"')) {
-      if (!_otpAutoSubmitting && !_resultChecked && !_orderStatusChecked) {
+      if (!_otpAutoSubmitting && !_resultChecked && !_orderStatusChecked && !_lotteryApplied) {
         // Trang lỗi sau OTP → relogin nhẹ, không clear cookie
         if (_passedOtpPage) {
           unawaited(_reloginAfterOtpError());
@@ -1369,6 +1602,137 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _setStatus('🚚 発送済み — không tìm thấy mã vận chuyển');
     }
     await Future.delayed(const Duration(seconds: 2));
+  }
+
+  Future<Map<String, dynamic>?> _runLotteryStep(String js,
+      {Duration timeout = const Duration(seconds: 5)}) async {
+    _lotteryApplyStepCompleter = Completer<Map<String, dynamic>>();
+    await _controller.runJavaScript(js);
+    try {
+      return await _lotteryApplyStepCompleter!.future.timeout(timeout);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _performLotteryApply() async {
+    if (!mounted) return;
+    final provider = context.read<AppProvider>();
+    final email = widget.account.email;
+    final keyword = provider.targetProductName;
+
+    _setStatus('🎲 Đang tìm lottery để apply...');
+
+    await Future.delayed(const Duration(milliseconds: 800));
+    await _waitForElement(['.comOrderList', '.comOrderList > li'], timeout: 8000);
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Step 1: Find matching 受付中 item + expand 詳しく見る
+    final expandResult = await _runLotteryStep(_lotteryFindAndExpandJs(keyword));
+    if (expandResult == null) {
+      _recordApplyError(provider, email, keyword, 'タイムアウト (expand)');
+      await _finishApply();
+      return;
+    }
+    if (expandResult['ok'] != true) {
+      final reason = expandResult['reason'] as String? ?? '';
+      String status;
+      String msg;
+      if (reason == 'no-accepting') {
+        status = '受付終了'; msg = '⚠️ Không có item 受付中';
+      } else if (reason == 'no-match') {
+        status = '対象なし'; msg = '⚠️ Không tìm thấy "$keyword"';
+      } else {
+        status = 'エラー'; msg = '❌ Lỗi: $reason';
+      }
+      provider.addLotteryApplyResult(LotteryApplyEntry(
+        accountEmail: email, productTitle: keyword, time: _nowStr(), status: status));
+      _setStatus(msg);
+      await _finishApply();
+      return;
+    }
+
+    final matchedTitle = expandResult['title'] as String? ?? keyword;
+    final lotteryId = expandResult['lotteryId'] as String? ?? '';
+    _setStatus('📋 Match: $matchedTitle — đang tick radio + checkbox...');
+
+    // Wait for expanded form to animate in + give user feel of natural delay
+    await Future.delayed(Duration(milliseconds: 1200 + (DateTime.now().millisecond % 500)));
+
+    // Step 2: Click radio + checkbox + 応募する link (opens popup)
+    final submitResult = await _runLotteryStep(_lotteryClickFormJs(lotteryId));
+    if (submitResult == null || submitResult['ok'] != true) {
+      final reason = submitResult?['reason'] as String? ?? 'タイムアウト';
+      _recordApplyError(provider, email, matchedTitle, 'submit: $reason');
+      await _finishApply();
+      return;
+    }
+
+    _setStatus('📨 Đang chờ popup xác nhận...');
+    // Wait for popup to appear (mfp-ready or pop01 visible)
+    await Future.delayed(const Duration(milliseconds: 900));
+    await _waitForElement(['#pop01', '#applyBtn', '.mfp-ready #pop01'], timeout: 5000);
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Step 3: Click confirm button inside popup
+    final confirmResult = await _runLotteryStep(_lotteryConfirmJs);
+    if (confirmResult == null || confirmResult['ok'] != true) {
+      final reason = confirmResult?['reason'] as String? ?? 'タイムアウト';
+      _recordApplyError(provider, email, matchedTitle, 'confirm: $reason');
+      await _finishApply();
+      return;
+    }
+
+    _setStatus('🚀 Đã submit — chờ kết quả...');
+    // Wait for navigation to result page (or text update)
+    await Future.delayed(const Duration(seconds: 3));
+
+    // Step 4: Detect result on the page
+    final detectResult = await _runLotteryStep(_lotteryResultDetectJs);
+    final detectStatus = detectResult?['status'] as String? ?? 'unknown';
+    String finalStatus;
+    String finalMsg;
+    if (detectStatus == 'success') {
+      finalStatus = '応募成功';
+      finalMsg = '🎁 応募成功 — $matchedTitle';
+    } else if (detectStatus == 'closed') {
+      finalStatus = '受付終了';
+      finalMsg = '⏰ 受付終了 — $matchedTitle';
+    } else {
+      // Unknown result — try waiting longer for redirect
+      await Future.delayed(const Duration(seconds: 3));
+      final retryDetect = await _runLotteryStep(_lotteryResultDetectJs);
+      final retryStatus = retryDetect?['status'] as String? ?? 'unknown';
+      if (retryStatus == 'success') {
+        finalStatus = '応募成功'; finalMsg = '🎁 応募成功 — $matchedTitle';
+      } else {
+        finalStatus = '応募失敗';
+        finalMsg = '❓ Không xác định được kết quả — coi là 応募失敗';
+      }
+    }
+
+    provider.addLotteryApplyResult(LotteryApplyEntry(
+      accountEmail: email, productTitle: matchedTitle,
+      time: _nowStr(), status: finalStatus));
+    _setStatus(finalMsg);
+    await _finishApply();
+  }
+
+  void _recordApplyError(AppProvider provider, String email, String title, String detail) {
+    provider.addLotteryApplyResult(LotteryApplyEntry(
+      accountEmail: email, productTitle: title, time: _nowStr(), status: 'エラー'));
+    _setStatus('❌ $detail');
+  }
+
+  Future<void> _finishApply() async {
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  String _nowStr() {
+    final t = DateTime.now();
+    final two = (int n) => n.toString().padLeft(2, '0');
+    return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
   }
 
   /// reCAPTCHA / block detected: clear cookies → đổi profile → 5G → retry login
@@ -1944,10 +2308,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
   }
 
-  /// Banner thống kê realtime cho lotteryResult / orderStatus mode
+  /// Banner thống kê realtime cho lotteryResult / orderStatus / lottery mode
   Widget _buildProgressBanner() {
     final mode = widget.account.mode;
-    if (mode != AccountMode.lotteryResult && mode != AccountMode.orderStatus) {
+    if (mode != AccountMode.lotteryResult &&
+        mode != AccountMode.orderStatus &&
+        mode != AccountMode.lottery) {
       return const SizedBox.shrink();
     }
     return Consumer<AppProvider>(
@@ -1955,8 +2321,38 @@ class _BrowserScreenState extends State<BrowserScreen> {
         if (mode == AccountMode.lotteryResult) {
           return _lotteryBanner(p.lotteryResults);
         }
+        if (mode == AccountMode.lottery) {
+          return _lotteryApplyBanner(p.lotteryApplyResults);
+        }
         return _orderStatusBanner(p.orderStatusResults);
       },
+    );
+  }
+
+  Widget _lotteryApplyBanner(List<LotteryApplyEntry> rows) {
+    final success = rows.where((e) => e.isSuccess).length;
+    final failed = rows.where((e) => e.isFailed).length;
+    final closed = rows.where((e) => e.isClosed).length;
+    final noMatch = rows.where((e) => e.isNoMatch).length;
+    final err = rows.where((e) => e.isError).length;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: AppColors.surfaceVariant,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            const Text('🎲 Lottery Apply',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+            const SizedBox(width: 8),
+            _bannerChip('成功', success, AppColors.done),
+            if (failed > 0) _bannerChip('失敗', failed, AppColors.error),
+            if (closed > 0) _bannerChip('終了', closed, Colors.grey),
+            if (noMatch > 0) _bannerChip('対象なし', noMatch, AppColors.textSecondary),
+            if (err > 0) _bannerChip('エラー', err, AppColors.warning),
+          ],
+        ),
+      ),
     );
   }
 
