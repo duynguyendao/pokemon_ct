@@ -656,11 +656,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
   @override
   void initState() {
     super.initState();
-    _profile = randomProfile();
+    final p = context.read<AppProvider>();
+    _profile = (p.fakeBrowser && p.fingerprintSeedMode)
+        ? seededProfile(widget.account.email)
+        : randomProfile();
     _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _elapsedSeconds++);
     });
-    final p = context.read<AppProvider>();
     final startUrl = widget.startUrl ?? p.loginUrl;
     unawaited(_initController(startUrl, incognito: p.incognitoMode));
 

@@ -310,6 +310,16 @@ DeviceProfile randomProfile({DeviceProfile? except}) {
   return pool[_rng.nextInt(pool.length)];
 }
 
+/// Trả về profile cố định dựa trên email — deterministic, không lưu SharedPreferences,
+/// không mất khi xóa/add lại account cùng email.
+DeviceProfile seededProfile(String email) {
+  var h = 0;
+  for (final c in email.codeUnits) {
+    h = (h * 31 + c) & 0x7FFFFFFF;
+  }
+  return kDeviceProfiles[h % kDeviceProfiles.length];
+}
+
 String buildAntiFingerprintScript(DeviceProfile p) {
   final langs = p.languages.map((l) => '"$l"').join(', ');
   final noiseSeed = _rng.nextInt(0xFFFF);

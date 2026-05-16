@@ -34,6 +34,7 @@ class StorageService {
   static const _shippingResultsKey = 'shippingResults';
   static const _lotteryApplyResultsKey = 'lotteryApplyResults';
   static const _lotteryApplyKeywordsKey = 'lotteryApplyKeywords';
+  static const _fingerprintSeedModeKey = 'fingerprintSeedMode';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -242,6 +243,16 @@ class StorageService {
       enabled: true,
     ),
   ];
+
+  Future<bool> loadFingerprintSeedMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_fingerprintSeedModeKey) ?? false;
+  }
+
+  Future<void> saveFingerprintSeedMode(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_fingerprintSeedModeKey, v);
+  }
 
   Future<List<String>> loadLotteryApplyKeywords() async {
     final prefs = await SharedPreferences.getInstance();

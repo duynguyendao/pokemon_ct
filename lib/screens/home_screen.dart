@@ -735,6 +735,23 @@ class _HomeScreenState extends State<HomeScreen>
                 activeThumbColor: AppColors.secondary,
               ),
               SwitchListTile(
+                value: prov.fingerprintSeedMode,
+                onChanged: prov.fakeBrowser ? prov.setFingerprintSeedMode : null,
+                title: Text(
+                  'Fingerprint cố định theo account',
+                  style: TextStyle(
+                    color: prov.fakeBrowser ? Colors.white : AppColors.textSecondary,
+                  ),
+                ),
+                subtitle: Text(
+                  prov.fakeBrowser
+                      ? 'Mỗi account có fingerprint riêng nhất quán — tắt = random mỗi session'
+                      : 'Cần bật "Giả mạo trình duyệt" trước',
+                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                activeThumbColor: AppColors.secondary,
+              ),
+              SwitchListTile(
                 value: prov.incognitoMode,
                 onChanged: prov.setIncognitoMode,
                 title: const Text(
