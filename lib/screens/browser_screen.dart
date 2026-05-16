@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/account.dart';
 import '../models/lottery_apply_entry.dart';
 import '../models/lottery_result_entry.dart';
 import '../models/order_status_entry.dart';
-import '../models/otp_entry.dart';
 import '../models/shipping_entry.dart';
 import '../models/proxy.dart';
 import '../providers/app_provider.dart';
@@ -1291,93 +1291,92 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
-  String? _getOtpForAccount() => context.read<AppProvider>().latestOtpForEmail(
-    widget.account.email,
-    after: _loginAttemptTime,
-  );
-
-  bool _matchesCurrentAccountOtp(OtpEntry otp, {String? excludeCode}) {
-    final recipient = otp.recipient?.toLowerCase().trim() ?? '';
-    final target = _normalizeEmail(widget.account.email);
-    if (recipient.isNotEmpty && _normalizeEmail(recipient) != target) {
-      return false;
-    }
-    if (_loginAttemptTime != null &&
-        otp.timestamp.isBefore(_loginAttemptTime!)) {
-      return false;
-    }
-    return excludeCode == null || otp.code != excludeCode;
-  }
-
-  String _normalizeEmail(String email) {
-    final trimmed = email.toLowerCase().trim();
-    final at = trimmed.lastIndexOf('@');
-    if (at <= 0) return trimmed;
-
-    var local = trimmed.substring(0, at);
-    final domain = trimmed.substring(at + 1);
-    final plus = local.indexOf('+');
-    if (plus >= 0) local = local.substring(0, plus);
-
-    if (domain == 'gmail.com' || domain == 'googlemail.com') {
-      local = local.replaceAll('.', '');
-      return '$local@gmail.com';
-    }
-    return '$local@$domain';
-  }
-
   Future<String?> _waitForOtpForAccount({
     required Duration timeout,
     String? excludeCode,
   }) async {
     final provider = context.read<AppProvider>();
+    if (provider.isGasOtpMode) {
+      return _waitForOtpFromGas(
+        timeout: timeout,
+        excludeCode: excludeCode,
+        gasUrl: provider.gasScriptUrl,
+        secret: provider.gasSecretKey,
+        toEmail: widget.account.email,
+      );
+    }
+    return _waitForOtpFromClipboard(timeout: timeout, excludeCode: excludeCode);
+  }
 
-    if (provider.isClipboardOtpMode) {
-      return _waitForOtpFromClipboard(timeout: timeout, excludeCode: excludeCode);
+  Future<String?> _waitForOtpFromGas({
+    required Duration timeout,
+    String? excludeCode,
+    required String gasUrl,
+    required String secret,
+    required String toEmail,
+  }) async {
+    if (gasUrl.isEmpty) return null;
+    final completer = Completer<String?>();
+    final otpRegex = RegExp(r'^\d{6}$');
+    final deadline = DateTime.now().add(timeout);
+    final afterMs = (_loginAttemptTime ?? DateTime.now())
+        .millisecondsSinceEpoch
+        .toString();
+
+    void finish(String? code) {
+      if (!completer.isCompleted) completer.complete(code);
     }
 
-    final existing = _getOtpForAccount();
-    if (existing != null && existing != excludeCode) return existing;
-
-    final completer = Completer<String?>();
-    StreamSubscription<OtpEntry>? sub;
-    Timer? timeoutTimer;
+    Timer? pollTimer;
     Timer? statusTimer;
     var elapsedSeconds = 0;
 
-    void finish(String? code) {
+    Future<void> poll() async {
       if (completer.isCompleted) return;
-      unawaited(sub?.cancel());
-      timeoutTimer?.cancel();
-      statusTimer?.cancel();
-      completer.complete(code);
+      try {
+        final base = Uri.parse(gasUrl);
+        final params = <String, String>{
+          ...base.queryParameters,
+          'after': afterMs,
+          'to': toEmail,
+        };
+        if (secret.isNotEmpty) params['secret'] = secret;
+        final uri = base.replace(queryParameters: params);
+        final resp = await http.get(uri).timeout(const Duration(seconds: 8));
+        if (completer.isCompleted) return;
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          if (data['ok'] == true) {
+            final otp = data['otp']?.toString().trim() ?? '';
+            if (otpRegex.hasMatch(otp) && otp != excludeCode) {
+              finish(otp);
+            }
+          }
+        }
+      } catch (_) {}
     }
 
-    void checkCachedOtp() {
-      final latest = _getOtpForAccount();
-      if (latest != null && latest != excludeCode) finish(latest);
-    }
-
-    sub = provider.otpStream.listen((otp) {
-      if (!mounted) {
+    pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (DateTime.now().isAfter(deadline)) {
         finish(null);
-        return;
-      }
-      if (_matchesCurrentAccountOtp(otp, excludeCode: excludeCode)) {
-        finish(otp.code);
+      } else {
+        poll();
       }
     });
-
-    timeoutTimer = Timer(timeout, () => finish(null));
-    statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      elapsedSeconds += 5;
+    statusTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      elapsedSeconds++;
       if (mounted && !completer.isCompleted) {
-        _setStatus('Cho OTP... $elapsedSeconds/${timeout.inSeconds}s');
+        _setStatus('⏳ Chờ GAS OTP... ${elapsedSeconds}s/${timeout.inSeconds}s');
       }
     });
 
-    checkCachedOtp();
-    return completer.future;
+    // Poll ngay lập tức lần đầu
+    await poll();
+
+    final result = await completer.future;
+    pollTimer.cancel();
+    statusTimer.cancel();
+    return result;
   }
 
   // MethodChannel để đọc changeCount clipboard mà không đọc nội dung (tránh paste dialog)
@@ -2455,52 +2454,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
                       });
                       _controller.loadRequest(
                         Uri.parse(context.read<AppProvider>().loginUrl),
-                      );
-                    },
-                  ),
-                  // OTP display — nhấn để fill + submit thủ công
-                  Consumer<AppProvider>(
-                    builder: (context, prov, child) {
-                      final otp = prov.latestOtpForEmail(
-                        widget.account.email,
-                        after: _loginAttemptTime,
-                      );
-                      return GestureDetector(
-                        onTap: otp != null ? () => _doSubmitOtp(otp) : null,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: otp != null
-                                ? AppColors.done
-                                : AppColors.card,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.sms,
-                                size: 14,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                otp ?? 'OTP',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: otp != null
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                  fontSize: 13,
-                                  letterSpacing: otp != null ? 2 : 0,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                       );
                     },
                   ),

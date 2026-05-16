@@ -14,7 +14,8 @@ class StorageService {
   static const _proxiesKey = 'proxies';
   static const _groupsKey = 'groups';
   static const _filterRulesKey = 'filterRules';
-  static const _imapConfigKey = 'imapConfig';
+  static const _gasScriptUrlKey = 'gasScriptUrl';
+  static const _gasSecretKeyKey = 'gasSecretKey';
   static const _urlConfigKey = 'urlConfig';
   static const _defaultPasswordKey = 'defaultPassword';
   static const _proxyEnabledKey = 'proxyEnabled';
@@ -96,16 +97,24 @@ class StorageService {
     );
   }
 
-  Future<Map<String, String>> loadImapConfig() async {
+  Future<String> loadGasScriptUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_imapConfigKey);
-    if (raw == null) return _defaultImapConfig();
-    return Map<String, String>.from(jsonDecode(raw) as Map);
+    return prefs.getString(_gasScriptUrlKey) ?? '';
   }
 
-  Future<void> saveImapConfig(Map<String, String> config) async {
+  Future<void> saveGasScriptUrl(String url) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_imapConfigKey, jsonEncode(config));
+    await prefs.setString(_gasScriptUrlKey, url);
+  }
+
+  Future<String> loadGasSecretKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_gasSecretKeyKey) ?? '';
+  }
+
+  Future<void> saveGasSecretKey(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_gasSecretKeyKey, key);
   }
 
   Future<String> loadDefaultPassword() async {
@@ -232,14 +241,6 @@ class StorageService {
       enabled: true,
     ),
   ];
-
-  Map<String, String> _defaultImapConfig() => {
-    'host': 'imap.gmail.com',
-    'port': '993',
-    'username': 'duynguyenpk8793@gmail.com',
-    'password': '',
-    'pollInterval': '1',
-  };
 
   Future<Map<String, String>> loadUrlConfig() async {
     final prefs = await SharedPreferences.getInstance();

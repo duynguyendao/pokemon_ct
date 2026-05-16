@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../models/proxy.dart';
 import '../providers/app_provider.dart';
 import '../utils/app_theme.dart';
-import 'package:intl/intl.dart';
 
 class ProxyManagerScreen extends StatefulWidget {
   const ProxyManagerScreen({super.key});
@@ -186,7 +185,10 @@ class _ProxyManagerScreenState extends State<ProxyManagerScreen> {
   @override
   Widget build(BuildContext context) {
     final p = context.watch<AppProvider>();
-    final fmt = DateFormat('dd/MM HH:mm');
+    String fmtDate(DateTime dt) {
+      final two = (int n) => n.toString().padLeft(2, '0');
+      return '${two(dt.day)}/${two(dt.month)} ${two(dt.hour)}:${two(dt.minute)}';
+    }
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -270,7 +272,7 @@ class _ProxyManagerScreenState extends State<ProxyManagerScreen> {
                                     const Text(' · ',
                                         style: TextStyle(color: AppColors.textSecondary)),
                                     Text(
-                                      fmt.format(proxy.lastUsed!),
+                                      fmtDate(proxy.lastUsed!),
                                       style: const TextStyle(
                                           color: AppColors.textSecondary, fontSize: 11),
                                     ),

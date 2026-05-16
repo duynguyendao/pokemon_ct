@@ -1084,6 +1084,16 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ] else ...[
             IconButton(
+              icon: const Icon(Icons.select_all, color: AppColors.accent),
+              tooltip: 'Chọn tất cả',
+              onPressed: filtered.isEmpty
+                  ? null
+                  : () => setState(() {
+                        _batchMode = true;
+                        _selected.addAll(filtered.map((a) => a.id));
+                      }),
+            ),
+            IconButton(
               icon: const Icon(
                 Icons.play_circle_outline,
                 color: AppColors.done,

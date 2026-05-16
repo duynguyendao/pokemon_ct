@@ -89,26 +89,8 @@ class _MainShellState extends State<_MainShell> {
             icon: const Icon(Icons.catching_pokemon),
             label: 'Tài khoản (${p.todoCount})',
           ),
-          BottomNavigationBarItem(
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.sms_outlined),
-                if (p.imapRunning)
-                  Positioned(
-                    right: -2,
-                    top: -2,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppColors.done,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.sms_outlined),
             label: 'OTP Monitor',
           ),
           BottomNavigationBarItem(
