@@ -1400,7 +1400,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         };
         if (secret.isNotEmpty) params['secret'] = secret;
         final uri = base.replace(queryParameters: params);
-        final resp = await http.get(uri).timeout(const Duration(seconds: 8));
+        final resp = await http.get(uri).timeout(const Duration(seconds: 5));
         if (completer.isCompleted) return;
         if (resp.statusCode == 200) {
           final data = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -1414,7 +1414,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       } catch (_) {}
     }
 
-    pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    pollTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       if (DateTime.now().isAfter(deadline)) {
         finish(null);
       } else {
@@ -1428,8 +1428,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
       }
     });
 
-    // Poll ngay lập tức lần đầu
+    // Poll ngay lập tức + burst thêm 2 lần trong 1.6s đầu
     await poll();
+    Future.delayed(const Duration(milliseconds: 800), () { if (!completer.isCompleted) poll(); });
+    Future.delayed(const Duration(milliseconds: 1600), () { if (!completer.isCompleted) poll(); });
 
     final result = await completer.future;
     pollTimer.cancel();
