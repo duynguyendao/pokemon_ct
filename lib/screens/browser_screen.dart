@@ -712,7 +712,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     _statusOverlay = OverlayEntry(
       builder: (_) => Positioned(
-        top: MediaQuery.of(context).padding.top + kToolbarHeight + 8,
+        top: MediaQuery.of(context).padding.top + 140,
         left: 16,
         right: 16,
         child: Material(
@@ -2303,262 +2303,278 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final p = context.watch<AppProvider>();
     return Scaffold(
       backgroundColor: AppColors.surface,
-      appBar: AppBar(
-        backgroundColor: AppColors.surfaceVariant,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    widget.account.email,
-                    style: const TextStyle(fontSize: 13, color: Colors.white),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (widget.accountIndex != null) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: AppColors.accent.withAlpha(40),
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: AppColors.accent.withAlpha(100)),
-                    ),
-                    child: Text(
-                      '${widget.accountIndex}/${widget.totalAccounts}',
-                      style: const TextStyle(
-                        color: AppColors.accent,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    _currentUrl.length > 32
-                        ? '${_currentUrl.substring(0, 32)}...'
-                        : _currentUrl,
-                    style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _shortUaLabel(_profile.userAgent),
-                  style: const TextStyle(fontSize: 10, color: AppColors.secondary),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                if (_captchaCount > 0) ...[
-                  Text(
-                    '⚠️ $_captchaCount',
-                    style: const TextStyle(fontSize: 10, color: AppColors.warning),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                Text(
-                  '⏱ ${_formatElapsed(_elapsedSeconds)}',
-                  style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
-                ),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          // Nút shuffle UA (#2)
-          IconButton(
-            icon: const Icon(Icons.shuffle, color: AppColors.secondary, size: 20),
-            tooltip: 'Đổi User Agent ngẫu nhiên',
-            onPressed: () async {
-              final newProfile = randomProfile(except: _profile);
-              setState(() {
-                _profile = newProfile;
-                _lastAutoFillUrl = null;
-              });
-              await _controller.setUserAgent(_profile.userAgent);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('UA: ${_profile.name}  •  ${_shortUaLabel(_profile.userAgent)}'),
-                  backgroundColor: AppColors.surfaceVariant,
-                  duration: const Duration(seconds: 2),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-              _controller.reload();
-            },
-          ),
-          if (widget.isRunningAll) ...[
-            if (widget.onSkipCurrent != null)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.warning,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    minimumSize: Size.zero,
-                  ),
-                  onPressed: widget.onSkipCurrent,
-                  icon: const Icon(Icons.skip_next, size: 16),
-                  label: const Text('Skip', style: TextStyle(fontSize: 11)),
-                ),
-              ),
-            if (widget.onStopAll != null)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.error,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    minimumSize: Size.zero,
-                  ),
-                  onPressed: widget.onStopAll,
-                  icon: const Icon(Icons.stop, size: 16),
-                  label: const Text('Stop All', style: TextStyle(fontSize: 11)),
-                ),
-              ),
-          ] else if (widget.proxy != null)
-            IconButton(
-              icon: const Icon(Icons.vpn_lock, color: AppColors.done, size: 20),
-              onPressed: _showProxyInfo,
-            ),
-        ],
-      ),
       body: Stack(
         children: [
           WebViewWidget(controller: _controller),
-          Positioned(
-            top: 0, left: 0, right: 0,
-            child: _buildProgressBanner(),
-          ),
-          if (_loading)
-            const Positioned(
-              top: 0, left: 0, right: 0,
-              child: LinearProgressIndicator(
-                backgroundColor: AppColors.surfaceVariant,
-                valueColor: AlwaysStoppedAnimation(AppColors.primary),
-              ),
-            ),
+          _buildTopOverlay(p),
+          _buildBottomOverlay(p),
         ],
       ),
-      bottomNavigationBar: Container(
-        color: AppColors.surfaceVariant,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Quick nav
-              Row(
-                children: [
-                  _urlBtn('Login', p.loginUrl, AppColors.primary),
-                  const SizedBox(width: 6),
-                  if (p.lotteryUrl.isNotEmpty) ...[
-                    _urlBtn('Lottery', p.lotteryUrl, AppColors.secondary),
-                    const SizedBox(width: 6),
-                  ],
-                  if (p.lotteryResultUrl.isNotEmpty)
-                    _urlBtn('Result', p.lotteryResultUrl, AppColors.done),
-                  const Spacer(),
-                  ElevatedButton.icon(
-                    onPressed: _autoFilling ? null : _autoFill,
-                    icon: _autoFilling
-                        ? const SizedBox(
-                            width: 12,
-                            height: 12,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.auto_fix_high, size: 14),
-                    label: Text(
-                      _autoFilling ? '...' : 'Tự điền',
-                      style: const TextStyle(fontSize: 11),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _autoFilling
-                          ? AppColors.card
-                          : AppColors.secondary,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      minimumSize: Size.zero,
-                    ),
-                  ),
-                ],
-              ),
-              // Browser controls
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+    );
+  }
+
+  Widget _buildTopOverlay(AppProvider p) {
+    final topPad = MediaQuery.of(context).padding.top;
+    return Positioned(
+      top: 0, left: 0, right: 0,
+      child: Container(
+        color: const Color.fromRGBO(12, 12, 18, 0.82),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(height: topPad),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Row(
                 children: [
                   IconButton(
-                    icon: Icon(
-                      Icons.arrow_back_ios,
-                      size: 18,
-                      color: _canGoBack
-                          ? Colors.white
-                          : AppColors.textSecondary,
+                    icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.account.email,
+                                style: const TextStyle(fontSize: 13, color: Colors.white),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (widget.accountIndex != null) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: AppColors.accent.withAlpha(40),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: AppColors.accent.withAlpha(100)),
+                                ),
+                                child: Text(
+                                  '${widget.accountIndex}/${widget.totalAccounts}',
+                                  style: const TextStyle(
+                                    color: AppColors.accent,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                _currentUrl.length > 32
+                                    ? '${_currentUrl.substring(0, 32)}...'
+                                    : _currentUrl,
+                                style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _shortUaLabel(_profile.userAgent),
+                              style: const TextStyle(fontSize: 10, color: AppColors.secondary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            if (_captchaCount > 0) ...[
+                              Text(
+                                '⚠️ $_captchaCount',
+                                style: const TextStyle(fontSize: 10, color: AppColors.warning),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            Text(
+                              '⏱ ${_formatElapsed(_elapsedSeconds)}',
+                              style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    onPressed: _canGoBack ? () => _controller.goBack() : null,
                   ),
                   IconButton(
-                    icon: Icon(
-                      Icons.arrow_forward_ios,
-                      size: 18,
-                      color: _canGoForward
-                          ? Colors.white
-                          : AppColors.textSecondary,
-                    ),
-                    onPressed: _canGoForward
-                        ? () => _controller.goForward()
-                        : null,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.refresh, size: 18),
-                    onPressed: () {
-                      // Reset state khi reload để trigger lại detection
+                    icon: const Icon(Icons.shuffle, color: AppColors.secondary, size: 20),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    tooltip: 'Đổi User Agent ngẫu nhiên',
+                    onPressed: () async {
+                      final newProfile = randomProfile(except: _profile);
                       setState(() {
-                        _lastOtpPageUrl = null;
-                        _otpAutoSubmitting = false;
+                        _profile = newProfile;
+                        _lastAutoFillUrl = null;
                       });
+                      await _controller.setUserAgent(_profile.userAgent);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('UA: ${_profile.name}  •  ${_shortUaLabel(_profile.userAgent)}'),
+                            backgroundColor: AppColors.surfaceVariant,
+                            duration: const Duration(seconds: 2),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
                       _controller.reload();
                     },
                   ),
-                  // Nút relogin thủ công (#7)
-                  IconButton(
-                    icon: const Icon(Icons.login, size: 18, color: AppColors.warning),
-                    tooltip: 'Relogin',
-                    onPressed: () {
-                      setState(() {
-                        _loginAttemptTime = null;
-                        _lastAutoFillUrl = null;
-                        _lastOtpPageUrl = null;
-                        _otpAutoSubmitting = false;
-                        _passedOtpPage = false;
-                      });
-                      _controller.loadRequest(
-                        Uri.parse(context.read<AppProvider>().loginUrl),
-                      );
-                    },
-                  ),
+                  if (widget.isRunningAll) ...[
+                    if (widget.onSkipCurrent != null)
+                      SizedBox(
+                        height: 32,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.warning,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: Size.zero,
+                          ),
+                          onPressed: widget.onSkipCurrent,
+                          icon: const Icon(Icons.skip_next, size: 14),
+                          label: const Text('Skip', style: TextStyle(fontSize: 10)),
+                        ),
+                      ),
+                    const SizedBox(width: 4),
+                    if (widget.onStopAll != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: SizedBox(
+                          height: 32,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.error,
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              minimumSize: Size.zero,
+                            ),
+                            onPressed: widget.onStopAll,
+                            icon: const Icon(Icons.stop, size: 14),
+                            label: const Text('Stop', style: TextStyle(fontSize: 10)),
+                          ),
+                        ),
+                      ),
+                  ] else if (widget.proxy != null)
+                    IconButton(
+                      icon: const Icon(Icons.vpn_lock, color: AppColors.done, size: 20),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      onPressed: _showProxyInfo,
+                    ),
                 ],
               ),
-            ],
-          ),
+            ),
+            _buildProgressBanner(),
+            if (_loading)
+              const LinearProgressIndicator(
+                backgroundColor: Colors.transparent,
+                valueColor: AlwaysStoppedAnimation(AppColors.primary),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomOverlay(AppProvider p) {
+    final bottomPad = MediaQuery.of(context).padding.bottom;
+    return Positioned(
+      bottom: 0, left: 0, right: 0,
+      child: Container(
+        color: const Color.fromRGBO(12, 12, 18, 0.82),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                _urlBtn('Login', p.loginUrl, AppColors.primary),
+                const SizedBox(width: 6),
+                if (p.lotteryUrl.isNotEmpty) ...[
+                  _urlBtn('Lottery', p.lotteryUrl, AppColors.secondary),
+                  const SizedBox(width: 6),
+                ],
+                if (p.lotteryResultUrl.isNotEmpty)
+                  _urlBtn('Result', p.lotteryResultUrl, AppColors.done),
+                const Spacer(),
+                ElevatedButton.icon(
+                  onPressed: _autoFilling ? null : _autoFill,
+                  icon: _autoFilling
+                      ? const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.auto_fix_high, size: 14),
+                  label: Text(
+                    _autoFilling ? '...' : 'Tự điền',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _autoFilling ? AppColors.card : AppColors.secondary,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                IconButton(
+                  icon: Icon(
+                    Icons.arrow_back_ios,
+                    size: 18,
+                    color: _canGoBack ? Colors.white : AppColors.textSecondary,
+                  ),
+                  onPressed: _canGoBack ? () => _controller.goBack() : null,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.arrow_forward_ios,
+                    size: 18,
+                    color: _canGoForward ? Colors.white : AppColors.textSecondary,
+                  ),
+                  onPressed: _canGoForward ? () => _controller.goForward() : null,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  onPressed: () {
+                    setState(() {
+                      _lastOtpPageUrl = null;
+                      _otpAutoSubmitting = false;
+                    });
+                    _controller.reload();
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.login, size: 18, color: AppColors.warning),
+                  tooltip: 'Relogin',
+                  onPressed: () {
+                    setState(() {
+                      _loginAttemptTime = null;
+                      _lastAutoFillUrl = null;
+                      _lastOtpPageUrl = null;
+                      _otpAutoSubmitting = false;
+                      _passedOtpPage = false;
+                    });
+                    _controller.loadRequest(
+                      Uri.parse(context.read<AppProvider>().loginUrl),
+                    );
+                  },
+                ),
+              ],
+            ),
+            SizedBox(height: bottomPad),
+          ],
         ),
       ),
     );
@@ -2591,9 +2607,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final closed = rows.where((e) => e.isClosed).length;
     final noMatch = rows.where((e) => e.isNoMatch).length;
     final err = rows.where((e) => e.isError).length;
-    return Container(
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: AppColors.surfaceVariant,
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
@@ -2618,13 +2633,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final err = rows.where((r) => r.isError).length;
     final noResult = rows.where((r) => r.result == '対象なし' || r.result == '結果なし').length;
     final pending = rows.where((r) => r.result == '未定').length;
-    return Container(
-      width: double.infinity,
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceVariant,
-        border: Border(bottom: BorderSide(color: AppColors.divider)),
-      ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
@@ -2659,13 +2669,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final cancelled = rows.where((e) => e.isCancelled).length;
     final err = rows.where((e) => e.status == 'エラー').length;
     final noResult = rows.where((e) => e.status == '対象なし').length;
-    return Container(
-      width: double.infinity,
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceVariant,
-        border: Border(bottom: BorderSide(color: AppColors.divider)),
-      ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
