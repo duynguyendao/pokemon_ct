@@ -1933,6 +1933,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _otpAutoSubmitting = false;
       _loginAttemptTime = null;
       _passedOtpPage = false;
+      _lotteryApplied = false;
+      _pendingLotteryNavigation = false;
+      _resultChecked = false;
+      _pendingResultNavigation = false;
+      _orderStatusChecked = false;
+      _pendingOrderStatusNavigation = false;
+      _checkLoginAfterOtpError = false;
+      _otpFreezeRetryCount = 0;
     });
     await _controller.setUserAgent(_profile.userAgent);
 
@@ -1996,6 +2004,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _otpAutoSubmitting = false;
       _passedOtpPage = false;
       _checkLoginAfterOtpError = true;
+      _lotteryApplied = false;
+      _pendingLotteryNavigation = false;
+      _resultChecked = false;
+      _pendingResultNavigation = false;
+      _orderStatusChecked = false;
+      _pendingOrderStatusNavigation = false;
     });
     _setStatus('🔃 Đi đến URL ban đầu...');
     final target = widget.startUrl ?? p.loginUrl;
