@@ -34,6 +34,11 @@ class _OtherScreenState extends State<OtherScreen>
   late TextEditingController _orderSearchCtrl;
   String? _filterOrderStatus; // null = all
 
+  // Lottery apply keywords (3 slots)
+  late TextEditingController _kwCtrl1;
+  late TextEditingController _kwCtrl2;
+  late TextEditingController _kwCtrl3;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +49,10 @@ class _OtherScreenState extends State<OtherScreen>
     _searchCtrl.addListener(() => setState(() {}));
     _orderSearchCtrl = TextEditingController();
     _orderSearchCtrl.addListener(() => setState(() {}));
+    final kws = p.lotteryApplyKeywords;
+    _kwCtrl1 = TextEditingController(text: kws.length > 0 ? kws[0] : '');
+    _kwCtrl2 = TextEditingController(text: kws.length > 1 ? kws[1] : '');
+    _kwCtrl3 = TextEditingController(text: kws.length > 2 ? kws[2] : '');
   }
 
   @override
@@ -52,6 +61,9 @@ class _OtherScreenState extends State<OtherScreen>
     _productCtrl.dispose();
     _searchCtrl.dispose();
     _orderSearchCtrl.dispose();
+    _kwCtrl1.dispose();
+    _kwCtrl2.dispose();
+    _kwCtrl3.dispose();
     super.dispose();
   }
 
@@ -1314,18 +1326,88 @@ class _OtherScreenState extends State<OtherScreen>
     return Consumer<AppProvider>(
       builder: (context, p, _) {
         final rows = p.lotteryApplyResults;
-        if (rows.isEmpty) {
-          return const Center(
-            child: Text(
-              'Chưa có kết quả lottery apply',
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
-          );
-        }
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          child: _buildLotteryApplySection(p),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildLotteryApplyKeywordCard(p),
+              if (rows.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                _buildLotteryApplySection(p),
+              ] else
+                const Padding(
+                  padding: EdgeInsets.only(top: 32),
+                  child: Center(
+                    child: Text(
+                      'Chưa có kết quả lottery apply',
+                      style: TextStyle(color: AppColors.textSecondary),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         );
+      },
+    );
+  }
+
+  Widget _buildLotteryApplyKeywordCard(AppProvider p) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Từ khóa sản phẩm lottery',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Điền 1-3 từ khóa để apply nhiều sản phẩm cùng lúc. Để trống = apply sản phẩm 受付中 đầu tiên.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+            ),
+            const SizedBox(height: 12),
+            _kwField('Từ khóa 1', _kwCtrl1, 0, p),
+            const SizedBox(height: 10),
+            _kwField('Từ khóa 2', _kwCtrl2, 1, p),
+            const SizedBox(height: 10),
+            _kwField('Từ khóa 3', _kwCtrl3, 2, p),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _kwField(String label, TextEditingController ctrl, int idx, AppProvider p) {
+    return TextField(
+      controller: ctrl,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: 'VD: アビスアイ, MEGA拡張',
+        hintStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+        prefixIcon: const Icon(Icons.label_outline, color: AppColors.textSecondary, size: 18),
+        suffixIcon: ctrl.text.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear, color: AppColors.textSecondary, size: 16),
+                onPressed: () {
+                  ctrl.clear();
+                  p.setLotteryApplyKeyword(idx, '');
+                  setState(() {});
+                },
+              )
+            : null,
+        isDense: true,
+      ),
+      onChanged: (v) {
+        p.setLotteryApplyKeyword(idx, v.trim());
+        setState(() {});
       },
     );
   }

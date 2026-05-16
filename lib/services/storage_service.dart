@@ -33,6 +33,7 @@ class StorageService {
   static const _orderStatusResultsKey = 'orderStatusResults';
   static const _shippingResultsKey = 'shippingResults';
   static const _lotteryApplyResultsKey = 'lotteryApplyResults';
+  static const _lotteryApplyKeywordsKey = 'lotteryApplyKeywords';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -241,6 +242,16 @@ class StorageService {
       enabled: true,
     ),
   ];
+
+  Future<List<String>> loadLotteryApplyKeywords() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_lotteryApplyKeywordsKey) ?? ['', '', ''];
+  }
+
+  Future<void> saveLotteryApplyKeywords(List<String> keywords) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_lotteryApplyKeywordsKey, keywords);
+  }
 
   Future<Map<String, String>> loadUrlConfig() async {
     final prefs = await SharedPreferences.getInstance();

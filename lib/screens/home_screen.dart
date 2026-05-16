@@ -1084,40 +1084,8 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ] else ...[
             IconButton(
-              icon: const Icon(Icons.select_all, color: AppColors.accent),
-              tooltip: 'Chọn tất cả',
-              onPressed: filtered.isEmpty
-                  ? null
-                  : () => setState(() {
-                        _batchMode = true;
-                        _selected.addAll(filtered.map((a) => a.id));
-                      }),
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.play_circle_outline,
-                color: AppColors.done,
-              ),
-              tooltip: 'Start All (chạy tuần tự tất cả TODO)',
-              onPressed: () => _runAllAccounts(p),
-            ),
-            IconButton(
-              icon: const Icon(Icons.tune, color: AppColors.secondary),
-              tooltip: 'Set global mode (Login/Lottery/Result)',
-              onPressed: () => _showGlobalModeDialog(context, p),
-            ),
-            IconButton(
-              icon: const Icon(Icons.travel_explore, color: AppColors.accent),
-              tooltip: 'Trình duyệt độc lập',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const StandaloneBrowserScreen(),
-                ),
-              ),
-            ),
-            IconButton(
               icon: Icon(_searchVisible ? Icons.close : Icons.search),
+              tooltip: _searchVisible ? 'Đóng tìm' : 'Tìm kiếm',
               onPressed: () => setState(() {
                 _searchVisible = !_searchVisible;
                 if (!_searchVisible) {
@@ -1126,14 +1094,78 @@ class _HomeScreenState extends State<HomeScreen>
                 }
               }),
             ),
-            IconButton(
-              icon: const Icon(Icons.group),
-              onPressed: () => _showGroupManager(context, p),
-            ),
-            IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () => _showSettingsMenu(context, p),
-            ),
+            if (!_searchVisible) ...[
+              IconButton(
+                icon: const Icon(Icons.select_all, color: AppColors.accent),
+                tooltip: 'Chọn tất cả',
+                onPressed: filtered.isEmpty
+                    ? null
+                    : () => setState(() {
+                          _batchMode = true;
+                          _selected.addAll(filtered.map((a) => a.id));
+                        }),
+              ),
+              IconButton(
+                icon: const Icon(Icons.play_circle_outline, color: AppColors.done),
+                tooltip: 'Start All (TODO)',
+                onPressed: () => _runAllAccounts(p),
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                color: AppColors.surfaceVariant,
+                onSelected: (v) {
+                  switch (v) {
+                    case 'mode':
+                      _showGlobalModeDialog(context, p);
+                      break;
+                    case 'browser':
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => const StandaloneBrowserScreen()));
+                      break;
+                    case 'groups':
+                      _showGroupManager(context, p);
+                      break;
+                    case 'settings':
+                      _showSettingsMenu(context, p);
+                      break;
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'mode',
+                    child: Row(children: [
+                      Icon(Icons.tune, color: AppColors.secondary, size: 18),
+                      SizedBox(width: 10),
+                      Text('Set global mode', style: TextStyle(color: Colors.white)),
+                    ]),
+                  ),
+                  const PopupMenuItem(
+                    value: 'browser',
+                    child: Row(children: [
+                      Icon(Icons.travel_explore, color: AppColors.accent, size: 18),
+                      SizedBox(width: 10),
+                      Text('Trình duyệt độc lập', style: TextStyle(color: Colors.white)),
+                    ]),
+                  ),
+                  const PopupMenuItem(
+                    value: 'groups',
+                    child: Row(children: [
+                      Icon(Icons.group, size: 18, color: Colors.white),
+                      SizedBox(width: 10),
+                      Text('Quản lý nhóm', style: TextStyle(color: Colors.white)),
+                    ]),
+                  ),
+                  const PopupMenuItem(
+                    value: 'settings',
+                    child: Row(children: [
+                      Icon(Icons.settings, size: 18, color: Colors.white),
+                      SizedBox(width: 10),
+                      Text('Cài đặt', style: TextStyle(color: Colors.white)),
+                    ]),
+                  ),
+                ],
+              ),
+            ],
           ],
         ],
       ),

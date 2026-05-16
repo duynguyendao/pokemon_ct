@@ -546,6 +546,38 @@ class _BrowserScreenState extends State<BrowserScreen> {
 })();
 ''';
 
+  // Simulate natural scroll: scroll down ~30% then back to top — makes timing look human
+  static const String _naturalScrollJs = '''
+(function() {
+  var maxS = Math.max(0, document.body.scrollHeight - (window.innerHeight || 600));
+  var target = Math.floor(maxS * (0.15 + 0.2 * ((Date.now() % 1000) / 1000)));
+  if (target < 40) return;
+  var start = window.scrollY || 0;
+  var t0 = performance.now();
+  var dur = 700 + (Date.now() % 500);
+  function ease(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+  function step(ts) {
+    var p = Math.min((ts - t0) / dur, 1);
+    window.scrollTo(0, start + target * ease(p));
+    if (p < 1) { requestAnimationFrame(step); }
+    else {
+      // Pause 400-800ms then scroll back
+      var t1 = performance.now();
+      var pauseMs = 400 + (Date.now() % 400);
+      var retDur = 600 + (Date.now() % 400);
+      function ret(ts2) {
+        var p2 = Math.min((ts2 - t1 - pauseMs) / retDur, 1);
+        if (p2 < 0) { requestAnimationFrame(ret); return; }
+        window.scrollTo(0, target * (1 - ease(p2)));
+        if (p2 < 1) requestAnimationFrame(ret);
+      }
+      requestAnimationFrame(ret);
+    }
+  }
+  requestAnimationFrame(step);
+})();
+''';
+
   // Phát hiện reCAPTCHA challenge / trang bị block.
   // CHỈ trigger khi có challenge dialog THẬT (puzzle 9 ô) hoặc error message rõ ràng.
   // Pokemon Center load reCAPTCHA badge bình thường (invisible v3) → KHÔNG được trigger
@@ -975,6 +1007,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 'input[id*="email"]',
               ], timeout: 3000);
               // Re-check: handler khác có thể đã bắt đầu fill hoặc login đã được click
+              if (!mounted || _autoFilling || _loginAttemptTime != null) return;
+              // Human-like reading delay trước khi điền form
+              await Future.delayed(Duration(milliseconds: 600 + (DateTime.now().millisecond % 1400)));
               if (!mounted || _autoFilling || _loginAttemptTime != null) return;
               await _autoFill(silent: true);
             }
@@ -1799,137 +1834,151 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (!mounted) return;
     final provider = context.read<AppProvider>();
     final email = widget.account.email;
-    final keyword = provider.targetProductName;
 
-    // Step A: Đợi document.readyState === 'complete' (toàn bộ tài nguyên load xong)
+    // Collect keywords; empty list → apply first 受付中
+    final rawKws = provider.lotteryApplyKeywords;
+    final kwList = rawKws.where((k) => k.trim().isNotEmpty).toList();
+    final keywords = kwList.isEmpty ? <String>[''] : kwList;
+
+    // ── Page setup (once) ──────────────────────────────────────────────
     _setStatus('⏳ Đợi trang lottery load xong...');
     final pageReadyResult = await _runLotteryStep(
-      _waitPageCompleteJs,
-      timeout: const Duration(seconds: 18),
-    );
+      _waitPageCompleteJs, timeout: const Duration(seconds: 18));
     if (pageReadyResult == null || pageReadyResult['ok'] != true) {
       final state = pageReadyResult?['state'] as String? ?? 'unknown';
-      _recordApplyError(provider, email, keyword, 'page-not-loaded (state=$state)');
+      _recordApplyError(provider, email, keywords.first, 'page-not-loaded ($state)');
       await _finishApply();
       return;
     }
 
-    // Step B: Đợi 2 giây buffer cho Vue mount + API gọi xong + render
-    _setStatus('⏳ Trang đã load — đợi 2s cho Vue render...');
-    await Future.delayed(const Duration(seconds: 2));
+    // Natural scroll — simulate reading the page before interacting
+    _setStatus('⏳ Trang đã load — đợi Vue render...');
+    unawaited(_controller.runJavaScript(_naturalScrollJs));
+    await Future.delayed(const Duration(milliseconds: 2500));
 
-    // Step C: Poll DOM cho đến khi list (container + items + acceptBox + name) ready
     final waitResult = await _runLotteryStep(
-      _lotteryWaitListReadyJs,
-      timeout: const Duration(seconds: 25),
-    );
+      _lotteryWaitListReadyJs, timeout: const Duration(seconds: 25));
     if (waitResult == null) {
-      _recordApplyError(provider, email, keyword, 'タイムアウト (wait list)');
+      _recordApplyError(provider, email, keywords.first, 'タイムアウト (wait list)');
       await _finishApply();
       return;
     }
     if (waitResult['ok'] != true) {
       final reason = waitResult['reason'] as String? ?? '';
-      _recordApplyError(provider, email, keyword, 'list-not-ready: $reason');
+      _recordApplyError(provider, email, keywords.first, 'list-not-ready: $reason');
       await _finishApply();
       return;
     }
 
     final itemCount = waitResult['count'] as int? ?? 0;
     final acceptingCount = waitResult['accepting'] as int? ?? 0;
-    _setStatus('🎲 Tìm lottery ($itemCount items, $acceptingCount 受付中)...');
-
-    // Step D: Settle delay 1s cuối cho Vue reactivity ổn định hoàn toàn trước khi click
+    _setStatus('🎲 ${keywords.length} từ khóa ($itemCount items, $acceptingCount 受付中)...');
     await Future.delayed(const Duration(seconds: 1));
 
-    // Step 1: Find matching 受付中 item + expand 詳しく見る
-    final expandResult = await _runLotteryStep(_lotteryFindAndExpandJs(keyword));
-    if (expandResult == null) {
-      _recordApplyError(provider, email, keyword, 'タイムアウト (expand)');
-      await _finishApply();
-      return;
-    }
-    if (expandResult['ok'] != true) {
-      final reason = expandResult['reason'] as String? ?? '';
-      String status;
-      String msg;
-      if (reason == 'no-accepting') {
-        status = '受付終了'; msg = '⚠️ Không có item 受付中';
-      } else if (reason == 'no-match') {
-        status = '対象なし'; msg = '⚠️ Không tìm thấy "$keyword"';
-      } else {
-        status = 'エラー'; msg = '❌ Lỗi: $reason';
+    // ── Per-keyword apply loop ─────────────────────────────────────────
+    for (int ki = 0; ki < keywords.length; ki++) {
+      if (!mounted) return;
+      final keyword = keywords[ki].trim();
+      final kwLabel = keyword.isEmpty ? 'first-accepting' : keyword;
+
+      if (ki > 0) {
+        // Between keywords: scroll back to top + short delay
+        await Future.delayed(const Duration(milliseconds: 1200));
+        if (!mounted) return;
+        unawaited(_controller.runJavaScript(
+            'try{window.scrollTo({top:0,behavior:"smooth"});}catch(e){}'));
+        await Future.delayed(const Duration(milliseconds: 900));
       }
-      provider.addLotteryApplyResult(LotteryApplyEntry(
-        accountEmail: email, productTitle: keyword, time: _nowStr(), status: status));
-      _setStatus(msg);
-      await _finishApply();
-      return;
-    }
 
-    final matchedTitle = expandResult['title'] as String? ?? keyword;
-    final lotteryId = expandResult['lotteryId'] as String? ?? '';
-    _setStatus('📋 Match: $matchedTitle — đang tick radio + checkbox...');
+      _setStatus('🎲 [${ki+1}/${keywords.length}] Tìm "$kwLabel"...');
 
-    // Wait for expanded form to animate in + give user feel of natural delay
-    await Future.delayed(Duration(milliseconds: 1200 + (DateTime.now().millisecond % 500)));
+      // Step 1: Find + expand
+      final expandResult = await _runLotteryStep(_lotteryFindAndExpandJs(keyword));
+      if (expandResult == null) {
+        _recordApplyError(provider, email, kwLabel, 'タイムアウト (expand)');
+        continue;
+      }
+      if (expandResult['ok'] != true) {
+        final reason = expandResult['reason'] as String? ?? '';
+        String status;
+        String msg;
+        if (reason == 'no-accepting' || reason == 'no-list') {
+          status = '受付終了'; msg = '⚠️ Không có item 受付中';
+          provider.addLotteryApplyResult(LotteryApplyEntry(
+            accountEmail: email, productTitle: kwLabel, time: _nowStr(), status: status));
+          _setStatus(msg);
+          break; // No point checking other keywords — list is empty/closed
+        } else if (reason == 'no-match') {
+          status = '対象なし'; msg = '⚠️ [${ki+1}] Không khớp "$kwLabel"';
+        } else {
+          status = 'エラー'; msg = '❌ [${ki+1}] Lỗi: $reason';
+        }
+        provider.addLotteryApplyResult(LotteryApplyEntry(
+          accountEmail: email, productTitle: kwLabel, time: _nowStr(), status: status));
+        _setStatus(msg);
+        continue;
+      }
 
-    // Step 2: Click radio + checkbox + 応募する link (opens popup)
-    final submitResult = await _runLotteryStep(_lotteryClickFormJs(lotteryId));
-    if (submitResult == null || submitResult['ok'] != true) {
-      final reason = submitResult?['reason'] as String? ?? 'タイムアウト';
-      _recordApplyError(provider, email, matchedTitle, 'submit: $reason');
-      await _finishApply();
-      return;
-    }
+      final matchedTitle = expandResult['title'] as String? ?? kwLabel;
+      final lotteryId = expandResult['lotteryId'] as String? ?? '';
+      _setStatus('📋 [${ki+1}/${keywords.length}] $matchedTitle — tick form...');
 
-    _setStatus('📨 Đang chờ popup xác nhận...');
-    // Wait for popup to appear (mfp-ready or pop01 visible)
-    await Future.delayed(const Duration(milliseconds: 900));
-    await _waitForElement(['#pop01', '#applyBtn', '.mfp-ready #pop01'], timeout: 5000);
-    await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(Duration(milliseconds: 1200 + (DateTime.now().millisecond % 500)));
 
-    // Step 3: Click confirm button inside popup
-    final confirmResult = await _runLotteryStep(_lotteryConfirmJs);
-    if (confirmResult == null || confirmResult['ok'] != true) {
-      final reason = confirmResult?['reason'] as String? ?? 'タイムアウト';
-      _recordApplyError(provider, email, matchedTitle, 'confirm: $reason');
-      await _finishApply();
-      return;
-    }
+      // Step 2: Click form + 応募する
+      final submitResult = await _runLotteryStep(_lotteryClickFormJs(lotteryId));
+      if (submitResult == null || submitResult['ok'] != true) {
+        final reason = submitResult?['reason'] as String? ?? 'タイムアウト';
+        _recordApplyError(provider, email, matchedTitle, 'submit[$ki]: $reason');
+        continue;
+      }
 
-    _setStatus('🚀 Đã submit — chờ kết quả...');
-    // Wait for navigation to result page (or text update)
-    await Future.delayed(const Duration(seconds: 3));
+      _setStatus('📨 [${ki+1}/${keywords.length}] Chờ popup...');
+      await Future.delayed(const Duration(milliseconds: 900));
+      await _waitForElement(['#pop01', '#applyBtn', '.mfp-ready #pop01'], timeout: 5000);
+      await Future.delayed(const Duration(milliseconds: 500));
 
-    // Step 4: Detect result on the page
-    final detectResult = await _runLotteryStep(_lotteryResultDetectJs);
-    final detectStatus = detectResult?['status'] as String? ?? 'unknown';
-    String finalStatus;
-    String finalMsg;
-    if (detectStatus == 'success') {
-      finalStatus = '応募成功';
-      finalMsg = '🎁 応募成功 — $matchedTitle';
-    } else if (detectStatus == 'closed') {
-      finalStatus = '受付終了';
-      finalMsg = '⏰ 受付終了 — $matchedTitle';
-    } else {
-      // Unknown result — try waiting longer for redirect
+      // Step 3: Confirm popup
+      final confirmResult = await _runLotteryStep(_lotteryConfirmJs);
+      if (confirmResult == null || confirmResult['ok'] != true) {
+        final reason = confirmResult?['reason'] as String? ?? 'タイムアウト';
+        _recordApplyError(provider, email, matchedTitle, 'confirm[$ki]: $reason');
+        continue;
+      }
+
+      _setStatus('🚀 [${ki+1}/${keywords.length}] Submitted — chờ kết quả...');
       await Future.delayed(const Duration(seconds: 3));
-      final retryDetect = await _runLotteryStep(_lotteryResultDetectJs);
-      final retryStatus = retryDetect?['status'] as String? ?? 'unknown';
-      if (retryStatus == 'success') {
-        finalStatus = '応募成功'; finalMsg = '🎁 応募成功 — $matchedTitle';
+
+      // Step 4: Detect result
+      final detectResult = await _runLotteryStep(_lotteryResultDetectJs);
+      final detectStatus = detectResult?['status'] as String? ?? 'unknown';
+      String finalStatus;
+      String finalMsg;
+      if (detectStatus == 'success') {
+        finalStatus = '応募成功';
+        finalMsg = '🎁 [${ki+1}/${keywords.length}] 応募成功 — $matchedTitle';
+      } else if (detectStatus == 'closed') {
+        finalStatus = '受付終了';
+        finalMsg = '⏰ [${ki+1}/${keywords.length}] 受付終了 — $matchedTitle';
       } else {
-        finalStatus = '応募失敗';
-        finalMsg = '❓ Không xác định được kết quả — coi là 応募失敗';
+        await Future.delayed(const Duration(seconds: 3));
+        final retryDetect = await _runLotteryStep(_lotteryResultDetectJs);
+        final retryStatus = retryDetect?['status'] as String? ?? 'unknown';
+        if (retryStatus == 'success') {
+          finalStatus = '応募成功';
+          finalMsg = '🎁 [${ki+1}/${keywords.length}] 応募成功 — $matchedTitle';
+        } else {
+          finalStatus = '応募失敗';
+          finalMsg = '❓ [${ki+1}/${keywords.length}] Không rõ kết quả — $matchedTitle';
+        }
       }
+
+      provider.addLotteryApplyResult(LotteryApplyEntry(
+        accountEmail: email, productTitle: matchedTitle,
+        time: _nowStr(), status: finalStatus));
+      _setStatus(finalMsg);
     }
 
-    provider.addLotteryApplyResult(LotteryApplyEntry(
-      accountEmail: email, productTitle: matchedTitle,
-      time: _nowStr(), status: finalStatus));
-    _setStatus(finalMsg);
     await _finishApply();
   }
 
@@ -2390,21 +2439,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
             ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          _buildProgressBanner(),
-          Expanded(
-            child: Stack(
-              children: [
-                WebViewWidget(controller: _controller),
-                if (_loading)
-                  const LinearProgressIndicator(
-                    backgroundColor: AppColors.surfaceVariant,
-                    valueColor: AlwaysStoppedAnimation(AppColors.primary),
-                  ),
-              ],
-            ),
+          WebViewWidget(controller: _controller),
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: _buildProgressBanner(),
           ),
+          if (_loading)
+            const Positioned(
+              top: 0, left: 0, right: 0,
+              child: LinearProgressIndicator(
+                backgroundColor: AppColors.surfaceVariant,
+                valueColor: AlwaysStoppedAnimation(AppColors.primary),
+              ),
+            ),
         ],
       ),
       bottomNavigationBar: Container(

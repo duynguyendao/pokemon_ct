@@ -29,6 +29,7 @@ class AppProvider extends ChangeNotifier {
   String _gasScriptUrl = '';
   String _gasSecretKey = '';
   String _targetProductName = '';
+  List<String> _lotteryApplyKeywords = ['', '', ''];
   int _typingMinDelay = 80;
   int _typingMaxDelay = 180;
   int _otpWatchdogSeconds = 60;
@@ -69,6 +70,7 @@ class AppProvider extends ChangeNotifier {
   String get gasScriptUrl => _gasScriptUrl;
   String get gasSecretKey => _gasSecretKey;
   String get targetProductName => _targetProductName;
+  List<String> get lotteryApplyKeywords => List.unmodifiable(_lotteryApplyKeywords);
   int get typingMinDelay => _typingMinDelay;
   int get typingMaxDelay => _typingMaxDelay;
   int get otpWatchdogSeconds => _otpWatchdogSeconds;
@@ -115,6 +117,7 @@ class AppProvider extends ChangeNotifier {
     _gasScriptUrl = await _storage.loadGasScriptUrl();
     _gasSecretKey = await _storage.loadGasSecretKey();
     _targetProductName = await _storage.loadTargetProductName();
+    _lotteryApplyKeywords = await _storage.loadLotteryApplyKeywords();
     _typingMinDelay = await _storage.loadTypingMinDelay();
     _typingMaxDelay = await _storage.loadTypingMaxDelay();
     _otpWatchdogSeconds = await _storage.loadOtpWatchdogSeconds();
@@ -315,6 +318,15 @@ class AppProvider extends ChangeNotifier {
   Future<void> setTargetProductName(String name) async {
     _targetProductName = name;
     await _storage.saveTargetProductName(name);
+    notifyListeners();
+  }
+
+  Future<void> setLotteryApplyKeyword(int index, String value) async {
+    if (index < 0 || index >= _lotteryApplyKeywords.length) return;
+    final updated = List<String>.from(_lotteryApplyKeywords);
+    updated[index] = value;
+    _lotteryApplyKeywords = updated;
+    await _storage.saveLotteryApplyKeywords(_lotteryApplyKeywords);
     notifyListeners();
   }
 
