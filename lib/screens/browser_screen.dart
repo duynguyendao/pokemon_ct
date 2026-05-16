@@ -85,6 +85,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   // Lottery apply (lottery mode)
   bool _lotteryApplied = false;
   bool _pendingLotteryNavigation = false;
+  bool _landingPageClicked = false; // clicked .goLotteryBtn, waiting for lottery list
   Completer<Map<String, dynamic>>? _lotteryApplyStepCompleter;
 
   // Human-like typing completer — resolves khi JS báo typeDone
@@ -1006,17 +1007,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
               unawaited(_performOrderStatusCheck());
             }
 
-            // Trigger lottery apply khi đang ở trang lottery
+            // Lottery apply: hai giai đoạn — landing page → lottery list
             if (mounted &&
                 widget.account.mode == AccountMode.lottery &&
                 !_lotteryApplied &&
-                p.lotteryUrl.isNotEmpty &&
-                url.startsWith(
-                    p.lotteryUrl.contains('?')
-                        ? p.lotteryUrl.split('?').first
-                        : p.lotteryUrl)) {
-              _lotteryApplied = true;
-              unawaited(_performLotteryApply());
+                p.lotteryUrl.isNotEmpty) {
+              final base = p.lotteryUrl.contains('?')
+                  ? p.lotteryUrl.split('?').first
+                  : p.lotteryUrl;
+              if (!_landingPageClicked && url.startsWith(base)) {
+                // Giai đoạn 1: đang ở landing page → click .goLotteryBtn
+                setState(() => _landingPageClicked = true);
+                unawaited(_clickGoLotteryBtn());
+              } else if (_landingPageClicked && !url.startsWith(base)) {
+                // Giai đoạn 2: đã rời landing page → đang ở lottery list
+                _lotteryApplied = true;
+                unawaited(_performLotteryApply());
+              }
             }
 
             // Dùng JS để phát hiện field OTP — không có 'body' fallback
@@ -1199,6 +1206,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
         final data = jsonDecode(message) as Map<String, dynamic>;
         if (_lotteryApplyStepCompleter?.isCompleted == false) {
           _lotteryApplyStepCompleter!.complete(data);
+        }
+      } catch (_) {}
+      return;
+    }
+
+    // Landing page goLotteryBtn click result
+    if (message.contains('"type":"landingPage"')) {
+      try {
+        final data = jsonDecode(message) as Map<String, dynamic>;
+        if (data['step'] == 'goLotteryBtn' && data['ok'] != true) {
+          _setStatus('⚠️ Không tìm thấy nút 抽選へ進む — thử lại sau 2s...');
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted && _landingPageClicked && !_lotteryApplied) {
+              unawaited(_clickGoLotteryBtn());
+            }
+          });
         }
       } catch (_) {}
       return;
@@ -1748,6 +1771,30 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
+  Future<void> _clickGoLotteryBtn() async {
+    if (!mounted) return;
+    _setStatus('⏳ Landing page — chờ nút 抽選へ進む...');
+    await Future.delayed(const Duration(milliseconds: 1500));
+    if (!mounted) return;
+    await _controller.runJavaScript('''
+(function() {
+  function postMsg(o) { window._wk.postMessage(JSON.stringify(o)); }
+  var btn = document.querySelector('a.goLotteryBtn') ||
+            document.querySelector('.comBtn.fixBtn a') ||
+            document.querySelector('.goLotteryBtn');
+  if (btn) {
+    try { btn.scrollIntoView({block:'center', behavior:'instant'}); } catch(e) {}
+    setTimeout(function() {
+      try { btn.click(); } catch(e) {}
+      postMsg({type:'landingPage', step:'goLotteryBtn', ok:true});
+    }, 300 + Math.floor(Math.random() * 200));
+  } else {
+    postMsg({type:'landingPage', step:'goLotteryBtn', ok:false, reason:'not-found'});
+  }
+})();
+''');
+  }
+
   Future<void> _performLotteryApply() async {
     if (!mounted) return;
     final provider = context.read<AppProvider>();
@@ -1934,6 +1981,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _passedOtpPage = false;
       _lotteryApplied = false;
       _pendingLotteryNavigation = false;
+      _landingPageClicked = false;
       _resultChecked = false;
       _pendingResultNavigation = false;
       _orderStatusChecked = false;
@@ -2005,6 +2053,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       _checkLoginAfterOtpError = true;
       _lotteryApplied = false;
       _pendingLotteryNavigation = false;
+      _landingPageClicked = false;
       _resultChecked = false;
       _pendingResultNavigation = false;
       _orderStatusChecked = false;

@@ -37,7 +37,7 @@ class _OtherScreenState extends State<OtherScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
+    _tabCtrl = TabController(length: 3, vsync: this);
     final p = context.read<AppProvider>();
     _productCtrl = TextEditingController(text: p.targetProductName);
     _searchCtrl = TextEditingController();
@@ -151,6 +151,7 @@ class _OtherScreenState extends State<OtherScreen>
           tabs: const [
             Tab(text: 'Lottery Result'),
             Tab(text: 'Order Status'),
+            Tab(text: 'Lottery Apply'),
           ],
         ),
       ),
@@ -159,6 +160,7 @@ class _OtherScreenState extends State<OtherScreen>
         children: [
           _buildLotteryResultTab(),
           _buildOrderStatusTab(),
+          _buildLotteryApplyTab(),
         ],
       ),
     );
@@ -177,10 +179,6 @@ class _OtherScreenState extends State<OtherScreen>
               _buildKeywordCard(p),
               const SizedBox(height: 16),
               if (all.isNotEmpty) _buildResultsSection(p, all, rows),
-              if (p.lotteryApplyResults.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                _buildLotteryApplySection(p),
-              ],
             ],
           ),
         );
@@ -1308,6 +1306,28 @@ class _OtherScreenState extends State<OtherScreen>
         break;
     }
     return lines.join('\r\n');
+  }
+
+  // ─── Lottery Apply tab ─────────────────────────────────────────────────
+
+  Widget _buildLotteryApplyTab() {
+    return Consumer<AppProvider>(
+      builder: (context, p, _) {
+        final rows = p.lotteryApplyResults;
+        if (rows.isEmpty) {
+          return const Center(
+            child: Text(
+              'Chưa có kết quả lottery apply',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+          );
+        }
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: _buildLotteryApplySection(p),
+        );
+      },
+    );
   }
 
   // ─── Lottery Apply section ─────────────────────────────────────────────
