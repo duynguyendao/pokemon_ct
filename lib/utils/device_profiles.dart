@@ -890,6 +890,125 @@ String buildAntiFingerprintScript(DeviceProfile p) {
       }
     } catch(e) {}
 
+    // ── 38. Performance.now() sub-ms jitter (perf timing fingerprint) ─────
+    (function patchPerf() {
+      try {
+        var _origNow = Performance.prototype.now;
+        var _drift = (SEED % 100) / 10000;
+        Performance.prototype.now = function now() {
+          _drift += (Math.random() - 0.5) * 0.00002;
+          return _origNow.call(this) + _drift;
+        };
+        nativeStr(Performance.prototype.now, 'now');
+        // performance.timeOrigin — add same drift
+        var _origTODesc = Object.getOwnPropertyDescriptor(Performance.prototype, 'timeOrigin');
+        if (_origTODesc && _origTODesc.get) {
+          var _origTOGet = _origTODesc.get;
+          Object.defineProperty(Performance.prototype, 'timeOrigin', {
+            get: function() { return _origTOGet.call(this) + _drift; },
+            configurable: true
+          });
+        }
+      } catch(e) {}
+    })();
+
+    // ── 39. Geolocation — fake Tokyo coords ──────────────────────────────
+    (function patchGeo() {
+      try {
+        var _geoObj = {
+          getCurrentPosition: function(success) {
+            setTimeout(function() {
+              success({
+                coords: {
+                  latitude:  35.6762 + (SEED % 100) / 100000,
+                  longitude: 139.6503 + (SEED % 100) / 100000,
+                  altitude: null, accuracy: 50 + (SEED % 30),
+                  altitudeAccuracy: null, heading: null, speed: null
+                },
+                timestamp: Date.now()
+              });
+            }, 200 + (SEED % 300));
+          },
+          watchPosition: function(success) {
+            this.getCurrentPosition(success);
+            return SEED % 100;
+          },
+          clearWatch: function() {}
+        };
+        Object.defineProperty(nav, 'geolocation', {
+          get: function() { return _geoObj; },
+          configurable: true, enumerable: true
+        });
+      } catch(e) {}
+    })();
+
+    // ── 40. Font set spoofing (fonts_api) ─────────────────────────────────
+    (function patchFonts() {
+      try {
+        if (!document.fonts) return;
+        var _fs = {
+          size: 0, status: 'loaded',
+          check: function() { return false; },
+          load: function() { return Promise.resolve([]); },
+          forEach: function() {}
+        };
+        _fs.ready = Promise.resolve(_fs);
+        Object.defineProperty(document, 'fonts', {
+          get: function() { return _fs; }, configurable: true
+        });
+      } catch(e) {}
+    })();
+
+    // ── 41. Focus / hasFocus always true (focus_tracker) ─────────────────
+    (function patchFocus() {
+      try {
+        document.hasFocus = function() { return true; };
+        nativeStr(document.hasFocus, 'hasFocus');
+        // Drop visibilitychange listeners — bot-detection check
+        var _origAEL = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, fn, opts) {
+          if (type === 'visibilitychange' && this === document) return;
+          return _origAEL.call(this, type, fn, opts);
+        };
+        nativeStr(EventTarget.prototype.addEventListener, 'addEventListener');
+      } catch(e) {}
+    })();
+
+    // ── 42. WebGL warmup — normalize init timing (webgl_warmup) ──────────
+    (function warmupGL() {
+      try {
+        var _wc = document.createElement('canvas');
+        _wc.width = 1; _wc.height = 1;
+        var _wgl = _wc.getContext('webgl') || _wc.getContext('experimental-webgl');
+        if (_wgl) {
+          _wgl.getParameter(37445);
+          _wgl.getParameter(37446);
+          _wgl.getParameter(_wgl.RENDERER);
+        }
+      } catch(e) {}
+    })();
+
+    // ── 43. console.debug/log wrapper — hide automation traces ───────────
+    (function patchConsole() {
+      try {
+        ['debug','warn','error'].forEach(function(m) {
+          var orig = console[m];
+          console[m] = function() {
+            var msg = arguments[0] ? String(arguments[0]) : '';
+            if (msg.indexOf('_wk') >= 0 || msg.indexOf('webkit') >= 0) return;
+            return orig.apply(console, arguments);
+          };
+        });
+      } catch(e) {}
+    })();
+
+    // ── 44. navigator.doNotTrack = "1" ───────────────────────────────────
+    try {
+      Object.defineProperty(nav, 'doNotTrack', {
+        get: function() { return '1'; }, configurable: true
+      });
+    } catch(e) {}
+
   } catch(e) {}
 })();
 ''';
