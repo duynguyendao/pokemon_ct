@@ -14,12 +14,13 @@ class ExitAntySession {
 }
 
 class ExitAntyService {
+  final String host;
   final int port;
   final String token;
 
-  ExitAntyService({required this.port, this.token = ''});
+  ExitAntyService({this.host = '127.0.0.1', required this.port, this.token = ''});
 
-  String get _base => 'http://127.0.0.1:$port';
+  String get _base => 'http://$host:$port';
 
   Map<String, String> get _headers => {
     'Content-Type': 'application/json',

@@ -27,6 +27,7 @@ class AppProvider extends ChangeNotifier {
   String _automationEngine = 'webview';
   int _exitantyPort = 9519;
   String _exitantyToken = '';
+  String _exitantyHost = '127.0.0.1';
   bool _incognitoMode = false;
   bool _shortcut5gEnabled = true;
   bool _blockImages = false;
@@ -72,6 +73,7 @@ class AppProvider extends ChangeNotifier {
   bool get useExitanty => _automationEngine == 'exitanty';
   int get exitantyPort => _exitantyPort;
   String get exitantyToken => _exitantyToken;
+  String get exitantyHost => _exitantyHost;
   bool get incognitoMode => _incognitoMode;
   bool get shortcut5gEnabled => _shortcut5gEnabled;
   bool get blockImages => _blockImages;
@@ -126,6 +128,7 @@ class AppProvider extends ChangeNotifier {
     _automationEngine = await _storage.loadAutomationEngine();
     _exitantyPort = await _storage.loadExitantyPort();
     _exitantyToken = await _storage.loadExitantyToken();
+    _exitantyHost = await _storage.loadExitantyHost();
     _incognitoMode = await _storage.loadIncognitoMode();
     _shortcut5gEnabled = await _storage.loadShortcut5gEnabled();
     _blockImages = await _storage.loadBlockImages();
@@ -304,6 +307,12 @@ class AppProvider extends ChangeNotifier {
   Future<void> setExitantyToken(String token) async {
     _exitantyToken = token;
     await _storage.saveExitantyToken(token);
+    notifyListeners();
+  }
+
+  Future<void> setExitantyHost(String host) async {
+    _exitantyHost = host.trim().isEmpty ? '127.0.0.1' : host.trim();
+    await _storage.saveExitantyHost(_exitantyHost);
     notifyListeners();
   }
 

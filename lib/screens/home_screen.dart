@@ -697,48 +697,63 @@ class _HomeScreenState extends State<HomeScreen>
   void _showSettingsMenu(BuildContext ctx, AppProvider p) {
     final pwCtrl = TextEditingController(text: p.defaultPassword);
     final discordCtrl = TextEditingController(text: p.discordWebhookUrl);
+    final exitantyHostCtrl = TextEditingController(text: p.exitantyHost);
     final exitantyPortCtrl = TextEditingController(text: p.exitantyPort.toString());
     final exitantyTokenCtrl = TextEditingController(text: p.exitantyToken);
     showModalBottomSheet(
       context: ctx,
       backgroundColor: AppColors.surfaceVariant,
       isScrollControlled: true,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetCtx) => Consumer<AppProvider>(
-        builder: (_, prov, __) => SingleChildScrollView(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(sheetCtx).viewInsets.bottom + 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+        builder: (_, prov, __) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.85,
+          minChildSize: 0.4,
+          maxChildSize: 0.95,
+          builder: (_, scrollCtrl) => Column(
             children: [
-              // drag handle
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.divider,
-                    borderRadius: BorderRadius.circular(2),
+              // Header cố định
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 8, 0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40, height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.divider,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const Spacer(),
+                    const Text(
+                      'Cài đặt',
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: AppColors.textSecondary),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              // Scrollable content
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollCtrl,
+                  padding: EdgeInsets.only(
+                    left: 20, right: 20, top: 8,
+                    bottom: MediaQuery.of(sheetCtx).viewInsets.bottom + 24,
                   ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Cài đặt',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
               SwitchListTile(
                 value: prov.proxyEnabled,
                 onChanged: prov.setProxyEnabled,
@@ -1006,8 +1021,25 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               if (prov.automationEngine == 'exitanty') ...[
                 const SizedBox(height: 10),
+                // Host + Port row
                 Row(
                   children: [
+                    Expanded(
+                      flex: 4,
+                      child: TextField(
+                        controller: exitantyHostCtrl,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        keyboardType: TextInputType.url,
+                        decoration: const InputDecoration(
+                          labelText: 'Host',
+                          labelStyle: TextStyle(color: AppColors.textSecondary),
+                          hintText: '127.0.0.1',
+                          hintStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                        ),
+                        onChanged: (v) => prov.setExitantyHost(v),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
                       flex: 2,
                       child: TextField(
@@ -1026,27 +1058,24 @@ class _HomeScreenState extends State<HomeScreen>
                         },
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 5,
-                      child: TextField(
-                        controller: exitantyTokenCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
-                        decoration: const InputDecoration(
-                          labelText: 'Token (nếu có)',
-                          labelStyle: TextStyle(color: AppColors.textSecondary),
-                          hintText: 'Bearer token...',
-                          hintStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                        ),
-                        onChanged: (v) => prov.setExitantyToken(v.trim()),
-                      ),
-                    ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: exitantyTokenCtrl,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: const InputDecoration(
+                    labelText: 'Token (nếu có)',
+                    labelStyle: TextStyle(color: AppColors.textSecondary),
+                    hintText: 'Bearer token...',
+                    hintStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                  ),
+                  onChanged: (v) => prov.setExitantyToken(v.trim()),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'ExitAnty phải đang chạy trên thiết bị này. '
-                  'App sẽ gửi lệnh qua WebDriver HTTP đến localhost:${prov.exitantyPort}.',
+                  'Mở ExitAnty trước → vào Settings → chọn ExitAnty. '
+                  'Nếu dùng từ máy Mac qua Wi-Fi, nhập IP của iPhone vào Host.',
                   style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
                 ),
               ],
@@ -1062,6 +1091,10 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 onChanged: prov.setDefaultPassword,
+              ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),

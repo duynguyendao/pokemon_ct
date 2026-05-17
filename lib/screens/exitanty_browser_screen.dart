@@ -47,7 +47,7 @@ class _ExitAntyBrowserScreenState extends State<ExitAntyBrowserScreen> {
   void initState() {
     super.initState();
     final p = context.read<AppProvider>();
-    _svc = ExitAntyService(port: p.exitantyPort, token: p.exitantyToken);
+    _svc = ExitAntyService(host: p.exitantyHost, port: p.exitantyPort, token: p.exitantyToken);
     WidgetsBinding.instance.addPostFrameCallback((_) => _startAutomation());
   }
 
@@ -535,7 +535,7 @@ class _ExitAntyBrowserScreenState extends State<ExitAntyBrowserScreen> {
                 ),
                 const Spacer(),
                 Text(
-                  'port ${p.exitantyPort}',
+                  '${p.exitantyHost}:${p.exitantyPort}',
                   style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
                 ),
               ],

@@ -39,6 +39,7 @@ class StorageService {
   static const _automationEngineKey = 'automationEngine';
   static const _exitantyPortKey = 'exitantyPort';
   static const _exitantyTokenKey = 'exitantyToken';
+  static const _exitantyHostKey = 'exitantyHost';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -286,6 +287,16 @@ class StorageService {
   Future<void> saveExitantyToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_exitantyTokenKey, token);
+  }
+
+  Future<String> loadExitantyHost() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_exitantyHostKey) ?? '127.0.0.1';
+  }
+
+  Future<void> saveExitantyHost(String host) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_exitantyHostKey, host);
   }
 
   Future<bool> loadFingerprintSeedMode() async {
