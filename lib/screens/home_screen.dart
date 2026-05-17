@@ -9,6 +9,7 @@ import '../models/start_all_report.dart';
 import '../providers/app_provider.dart';
 import '../services/discord_service.dart';
 import '../services/shortcut_service.dart';
+import '../services/update_service.dart';
 import '../utils/app_theme.dart';
 import '../widgets/account_card.dart';
 import '../widgets/summary_card.dart';
@@ -44,6 +45,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   // Pokeball animation
   late AnimationController _pokeballController;
+
+  bool _checkingUpdate = false;
 
   @override
   void initState() {
@@ -665,6 +668,86 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Future<void> _checkUpdate(BuildContext ctx) async {
+    setState(() => _checkingUpdate = true);
+    try {
+      final info = await UpdateService.checkForUpdate();
+      if (!mounted) return;
+      if (!info.hasUpdate) {
+        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+          content: Text('Bạn đang dùng bản mới nhất rồi'),
+          duration: Duration(seconds: 2),
+        ));
+      } else {
+        showDialog(
+          context: ctx,
+          builder: (_) => AlertDialog(
+            backgroundColor: AppColors.card,
+            title: const Text(
+              'Có bản cập nhật mới',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Phiên bản mới: ${info.latestTag}',
+                  style: const TextStyle(color: AppColors.done, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Bản hiện tại: build ${info.currentBuild}',
+                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Cách cài qua Feather:',
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  '1. Nhấn "Copy link IPA" bên dưới\n2. Mở Feather → Install from URL → Dán link',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Để sau'),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copy link IPA'),
+                onPressed: info.ipaUrl.isEmpty
+                    ? null
+                    : () {
+                        Clipboard.setData(ClipboardData(text: info.ipaUrl));
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                          content: Text('Đã copy link IPA — mở Feather để cài'),
+                          duration: Duration(seconds: 3),
+                        ));
+                      },
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+          content: Text('Lỗi kiểm tra cập nhật: $e'),
+          backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 3),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
+  }
+
   void _showSettingsMenu(BuildContext ctx, AppProvider p) {
     final pwCtrl = TextEditingController(text: p.defaultPassword);
     final discordCtrl = TextEditingController(text: p.discordWebhookUrl);
@@ -916,6 +999,32 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   );
                 },
+              ),
+              ListTile(
+                leading: _checkingUpdate
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.secondary,
+                        ),
+                      )
+                    : const Icon(Icons.system_update_alt, color: AppColors.secondary),
+                title: const Text(
+                  'Kiểm tra cập nhật',
+                  style: TextStyle(color: Colors.white),
+                ),
+                subtitle: const Text(
+                  'So sánh với bản mới nhất trên GitHub',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                ),
+                trailing: const Icon(
+                  Icons.arrow_forward_ios,
+                  size: 14,
+                  color: AppColors.textSecondary,
+                ),
+                onTap: _checkingUpdate ? null : () => _checkUpdate(sheetCtx),
               ),
               const SizedBox(height: 8),
               const SizedBox(height: 12),
