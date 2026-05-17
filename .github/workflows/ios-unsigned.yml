@@ -25,21 +25,48 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos
 
+      - name: Set build version
+        id: version
+        run: |
+          BASE=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
+          BUILD=${{ github.run_number }}
+          VERSION="${BASE}+${BUILD}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "base=${BASE}" >> $GITHUB_OUTPUT
+          echo "build=${BUILD}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
       - name: Build iOS App (Unsigned)
         env:
           CODE_SIGNING_ALLOWED: "NO"
         run: |
-          flutter build ios --release --no-codesign --verbose
-          
+          flutter build ios --release --no-codesign \
+            --build-name=${{ steps.version.outputs.base }} \
+            --build-number=${{ steps.version.outputs.build }} \
+            --verbose
+
       - name: Create IPA (Unsigned)
         run: |
-          rm -rf Payload pokemon_ct_unsigned.ipa
+          IPA_NAME="PokemonCT_v${{ steps.version.outputs.base }}_b${{ steps.version.outputs.build }}.ipa"
+          echo "IPA_NAME=${IPA_NAME}" >> $GITHUB_ENV
+          rm -rf Payload
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          ditto -c -k --keepParent Payload pokemon_ct_unsigned.ipa
-          
-      - name: Upload IPA
+          ditto -c -k --keepParent Payload "${IPA_NAME}"
+
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pokemon_ct_unsigned_ipa
-          path: pokemon_ct_unsigned.ipa
+          name: PokemonCT_v${{ steps.version.outputs.base }}_b${{ steps.version.outputs.build }}
+          path: ${{ env.IPA_NAME }}
+          retention-days: 30
+
+      - name: Upload to Feather
+        if: ${{ secrets.FEATHER_API_KEY != '' }}
+        run: |
+          curl -s -X POST "https://feather.is/api/upload" \
+            -H "Authorization: Bearer ${{ secrets.FEATHER_API_KEY }}" \
+            -F "file=@${IPA_NAME}" \
+            -F "version=${{ steps.version.outputs.version }}" \
+            && echo "Feather upload OK" || echo "Feather upload failed (non-fatal)"
+        continue-on-error: true

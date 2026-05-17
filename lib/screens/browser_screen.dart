@@ -656,10 +656,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
 })();
 ''';
 
-  @override
   static const _deviceInfoChannel = MethodChannel('com.pokemonct/device_info');
   Map<String, dynamic>? _nativeDeviceInfo;
 
+  @override
   void initState() {
     super.initState();
     final p = context.read<AppProvider>();
