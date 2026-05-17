@@ -599,7 +599,7 @@ class _LogEntry {
 
 class _LogRow extends StatelessWidget {
   final _LogEntry entry;
-  const _LogRow({super.key, required this.entry});
+  const _LogRow({required this.entry});
 
   Color get _color {
     switch (entry.level) {
