@@ -21,6 +21,10 @@ import UIKit
         let controller = scene.windows.first?.rootViewController as? FlutterViewController
       else { return }
 
+      // Device info + content-rule channel
+      DeviceInfoChannel.shared.register(messenger: controller.binaryMessenger)
+      DeviceInfoChannel.shared.installContentRules()
+
       FlutterMethodChannel(name: "com.pokemonct/utils",
                            binaryMessenger: controller.binaryMessenger)
         .setMethodCallHandler { (call, result) in

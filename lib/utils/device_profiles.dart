@@ -320,10 +320,19 @@ DeviceProfile seededProfile(String email) {
   return kDeviceProfiles[h % kDeviceProfiles.length];
 }
 
-String buildAntiFingerprintScript(DeviceProfile p) {
+String buildAntiFingerprintScript(DeviceProfile p,
+    {Map<String, dynamic>? nativeInfo}) {
+  // Merge native device info (từ Swift) vào profile — ưu tiên native values
+  // vì chúng khớp chính xác với hardware thật.
+  final int screenW = (nativeInfo?['screenWidth']  as int?)  ?? p.screenWidth;
+  final int screenH = (nativeInfo?['screenHeight'] as int?)  ?? p.screenHeight;
+  final double dpr   = (nativeInfo?['devicePixelRatio'] as double?) ?? p.devicePixelRatio;
+  final int hc       = (nativeInfo?['hardwareConcurrency'] as int?) ?? p.hardwareConcurrency;
+  final int dm       = (nativeInfo?['deviceMemory']  as int?)  ?? p.deviceMemory;
+
   final langs = p.languages.map((l) => '"$l"').join(', ');
   final noiseSeed = _rng.nextInt(0xFFFF);
-  final availH = p.screenHeight - 40 - _rng.nextInt(20);
+  final availH = screenH - 40 - _rng.nextInt(20);
 
   // Tất cả profile giờ là Safari iOS — script hardcode behavior phù hợp
   // appVersion = phần sau "Mozilla/" trong UA
@@ -340,6 +349,12 @@ String buildAntiFingerprintScript(DeviceProfile p) {
 
   // Safari iOS có navigator.standalone
   const standaloneJs = 'def(nav, "standalone", false);';
+
+  // Shorthand cho §46 prototype override
+  final ua       = _jsEsc(p.userAgent);
+  final platform = _jsEsc(p.platform);
+  final vendor   = _jsEsc(p.vendor);
+  final mtp      = p.maxTouchPoints;
 
   return '''
 (function() {
@@ -387,7 +402,7 @@ String buildAntiFingerprintScript(DeviceProfile p) {
     def(nav, 'appVersion',          '$appVersion');
     def(nav, 'appName',             'Netscape');
     def(nav, 'product',             'Gecko');
-    def(nav, 'hardwareConcurrency', ${p.hardwareConcurrency});
+    def(nav, 'hardwareConcurrency', $hc);
     // Safari iOS KHÔNG hỗ trợ navigator.deviceMemory — phải để undefined
     try { delete nav.deviceMemory; } catch(e) {}
     try { Object.defineProperty(nav, 'deviceMemory', { get: () => undefined, configurable: true }); } catch(e) {}
@@ -403,18 +418,18 @@ String buildAntiFingerprintScript(DeviceProfile p) {
     $standaloneJs
 
     // ── 2. screen ──────────────────────────────────────────────────────────
-    def(screen, 'width',       ${p.screenWidth});
-    def(screen, 'height',      ${p.screenHeight});
-    def(screen, 'availWidth',  ${p.screenWidth});
+    def(screen, 'width',       $screenW);
+    def(screen, 'height',      $screenH);
+    def(screen, 'availWidth',  $screenW);
     def(screen, 'availHeight', $availH);
     def(screen, 'availLeft',   0);
     def(screen, 'availTop',    0);
     def(screen, 'colorDepth',  24);
     def(screen, 'pixelDepth',  24);
-    def(window, 'devicePixelRatio', ${p.devicePixelRatio});
-    def(window, 'outerWidth',  ${p.screenWidth});
-    def(window, 'outerHeight', ${p.screenHeight});
-    def(window, 'innerWidth',  ${p.screenWidth});
+    def(window, 'devicePixelRatio', $dpr);
+    def(window, 'outerWidth',  $screenW);
+    def(window, 'outerHeight', $screenH);
+    def(window, 'innerWidth',  $screenW);
     def(window, 'innerHeight', $availH);
     def(window, 'screenX',     0);
     def(window, 'screenY',     0);
@@ -1008,6 +1023,154 @@ String buildAntiFingerprintScript(DeviceProfile p) {
         get: function() { return '1'; }, configurable: true
       });
     } catch(e) {}
+
+    // ── 45. Patch Object.getOwnPropertyDescriptor + Reflect ──────────────
+    // Khi site dùng GOPD để kiểm tra property có bị override không,
+    // trả về descriptor "native-looking" thay vì descriptor của getter ta inject.
+    (function patchGOPD() {
+      try {
+        var _origGOPD  = Object.getOwnPropertyDescriptor;
+        var _origGOPDs = Object.getOwnPropertyDescriptors;
+        var _reflGOPD  = Reflect.getOwnPropertyDescriptor;
+
+        // Các property trên navigator mà ta đã định nghĩa lại
+        var _spoofedNavProps = {
+          userAgent: 1, platform: 1, vendor: 1, language: 1, languages: 1,
+          hardwareConcurrency: 1, deviceMemory: 1, maxTouchPoints: 1,
+          webdriver: 1, doNotTrack: 1, geolocation: 1, connection: 1,
+          plugins: 1, mimeTypes: 1
+        };
+
+        // Lấy descriptor từ prototype thay vì instance để trông như native
+        function nativeLookingDesc(proto, prop) {
+          try {
+            var d = _origGOPD.call(Object, proto, prop);
+            if (d) return d;
+          } catch(e) {}
+          return undefined;
+        }
+
+        Object.getOwnPropertyDescriptor = function getOwnPropertyDescriptor(obj, prop) {
+          // Nếu ai hỏi về property của navigator instance mà ta đã spoofed
+          if ((obj === nav || obj === Navigator.prototype) && _spoofedNavProps[prop]) {
+            // Trả về descriptor từ Navigator.prototype (trông native hơn)
+            var proto = Object.getPrototypeOf(nav);
+            var d = nativeLookingDesc(proto, prop);
+            if (d) return d;
+          }
+          return _origGOPD.apply(this, arguments);
+        };
+        nativeStr(Object.getOwnPropertyDescriptor, 'getOwnPropertyDescriptor');
+
+        Object.getOwnPropertyDescriptors = function getOwnPropertyDescriptors(obj) {
+          var descs = _origGOPDs.apply(this, arguments);
+          if (obj === nav) {
+            var proto = Object.getPrototypeOf(nav);
+            for (var p in _spoofedNavProps) {
+              var d = nativeLookingDesc(proto, p);
+              if (d) descs[p] = d;
+            }
+          }
+          return descs;
+        };
+        nativeStr(Object.getOwnPropertyDescriptors, 'getOwnPropertyDescriptors');
+
+        Reflect.getOwnPropertyDescriptor = function(obj, prop) {
+          if ((obj === nav || obj === Navigator.prototype) && _spoofedNavProps[prop]) {
+            var proto = Object.getPrototypeOf(nav);
+            var d = nativeLookingDesc(proto, prop);
+            if (d) return d;
+          }
+          return _reflGOPD.apply(this, arguments);
+        };
+        nativeStr(Reflect.getOwnPropertyDescriptor, 'getOwnPropertyDescriptor');
+      } catch(e) {}
+    })();
+
+    // ── 46. Chuyển key navigator overrides lên Navigator.prototype ────────
+    // Định nghĩa trên prototype thay vì instance → GOPD(navigator, prop) = undefined
+    // (đúng như browser thật), detector không thể thấy bị override ở instance level.
+    (function protoOverride() {
+      try {
+        var proto = Navigator.prototype;
+        var protoProps = {
+          userAgent:           { get: function userAgent()           { return '$ua'; } },
+          platform:            { get: function platform()            { return '$platform'; } },
+          vendor:              { get: function vendor()              { return '$vendor'; } },
+          hardwareConcurrency: { get: function hardwareConcurrency() { return $hc; } },
+          maxTouchPoints:      { get: function maxTouchPoints()      { return $mtp; } },
+          webdriver:           { get: function webdriver()           { return false; } },
+        };
+        for (var key in protoProps) {
+          try {
+            Object.defineProperty(proto, key, Object.assign(
+              { configurable: true, enumerable: true },
+              protoProps[key]
+            ));
+            // Đảm bảo toString() của getter trông như native code
+            nativeStr(Object.getOwnPropertyDescriptor(proto, key).get, key);
+          } catch(e) {}
+        }
+        // deviceMemory chỉ có trên secure contexts, define riêng để tránh lỗi
+        try {
+          Object.defineProperty(proto, 'deviceMemory', {
+            get: function deviceMemory() { return $dm; },
+            configurable: true, enumerable: true
+          });
+          nativeStr(Object.getOwnPropertyDescriptor(proto, 'deviceMemory').get, 'deviceMemory');
+        } catch(e) {}
+      } catch(e) {}
+    })();
+
+    // ── 47. Patch Object.keys / hasOwnProperty trên navigator ────────────
+    // Một số detector dùng hasOwnProperty để check property có trên instance không.
+    (function patchHasOwn() {
+      try {
+        var _origHasOwn = Object.prototype.hasOwnProperty;
+        var _spoofedNavProps = ['userAgent','platform','vendor','hardwareConcurrency',
+          'maxTouchPoints','webdriver','deviceMemory','doNotTrack'];
+        Object.defineProperty(nav, 'hasOwnProperty', {
+          value: function hasOwnProperty(prop) {
+            if (_spoofedNavProps.indexOf(prop) >= 0) return false;
+            return _origHasOwn.call(this, prop);
+          },
+          configurable: true, writable: true
+        });
+        nativeStr(nav.hasOwnProperty, 'hasOwnProperty');
+      } catch(e) {}
+    })();
+
+    // ── 48. Iframe fingerprint consistency ────────────────────────────────
+    // Patch document.createElement('iframe') để iframe mới tạo cũng có
+    // cùng navigator fingerprint — site hay tạo iframe ẩn để so sánh.
+    (function patchIframe() {
+      try {
+        var _origCE = document.createElement.bind(document);
+        document.createElement = function createElement(tag) {
+          var el = _origCE(tag);
+          if (typeof tag === 'string' && tag.toLowerCase() === 'iframe') {
+            el.addEventListener('load', function() {
+              try {
+                var iw = el.contentWindow;
+                if (!iw) return;
+                var inav = iw.navigator;
+                // Patch navigator của iframe để match outer frame
+                ['userAgent','platform','vendor'].forEach(function(p) {
+                  try {
+                    Object.defineProperty(inav, p, {
+                      get: function() { return nav[p]; },
+                      configurable: true
+                    });
+                  } catch(e2) {}
+                });
+              } catch(e) {}
+            });
+          }
+          return el;
+        };
+        nativeStr(document.createElement, 'createElement');
+      } catch(e) {}
+    })();
 
   } catch(e) {}
 })();

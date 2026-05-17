@@ -657,6 +657,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
 ''';
 
   @override
+  static const _deviceInfoChannel = MethodChannel('com.pokemonct/device_info');
+  Map<String, dynamic>? _nativeDeviceInfo;
+
   void initState() {
     super.initState();
     final p = context.read<AppProvider>();
@@ -667,7 +670,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if (mounted) setState(() => _elapsedSeconds++);
     });
     final startUrl = widget.startUrl ?? p.loginUrl;
-    unawaited(_initController(startUrl, incognito: p.incognitoMode));
+    // Query native device info trước, rồi mới init controller
+    unawaited(_initWithNativeInfo(startUrl, p.incognitoMode));
 
     // Show UA toast after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -852,6 +856,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
         !u.contains('twostep');
   }
 
+  Future<void> _initWithNativeInfo(String startUrl, bool incognito) async {
+    try {
+      final info = await _deviceInfoChannel.invokeMapMethod<String, dynamic>('getDeviceInfo');
+      if (info != null) _nativeDeviceInfo = info;
+    } catch (_) {}
+    if (mounted) unawaited(_initController(startUrl, incognito: incognito));
+  }
+
   Future<void> _initController(String startUrl, {bool incognito = false}) async {
     final p = context.read<AppProvider>();
 
@@ -903,7 +915,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
               }
             }
             if (p.fakeBrowser) {
-              _controller.runJavaScript(buildAntiFingerprintScript(_profile));
+              _controller.runJavaScript(buildAntiFingerprintScript(_profile, nativeInfo: _nativeDeviceInfo));
             }
           },
           onPageFinished: (url) async {
@@ -934,7 +946,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
             if (p.fakeBrowser) {
               await _controller.runJavaScript(
-                buildAntiFingerprintScript(_profile),
+                buildAntiFingerprintScript(_profile, nativeInfo: _nativeDeviceInfo),
               );
             }
 
