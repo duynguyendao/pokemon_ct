@@ -24,10 +24,6 @@ class AppProvider extends ChangeNotifier {
   bool _fakeBrowser = true;
   bool _fingerprintSeedMode = false;
   String _discordWebhookUrl = '';
-  String _automationEngine = 'webview';
-  int _exitantyPort = 9519;
-  String _exitantyToken = '';
-  String _exitantyHost = '127.0.0.1';
   bool _incognitoMode = false;
   bool _shortcut5gEnabled = true;
   bool _blockImages = false;
@@ -69,11 +65,6 @@ class AppProvider extends ChangeNotifier {
   bool get fakeBrowser => _fakeBrowser;
   bool get fingerprintSeedMode => _fingerprintSeedMode;
   String get discordWebhookUrl => _discordWebhookUrl;
-  String get automationEngine => _automationEngine;
-  bool get useExitanty => _automationEngine == 'exitanty';
-  int get exitantyPort => _exitantyPort;
-  String get exitantyToken => _exitantyToken;
-  String get exitantyHost => _exitantyHost;
   bool get incognitoMode => _incognitoMode;
   bool get shortcut5gEnabled => _shortcut5gEnabled;
   bool get blockImages => _blockImages;
@@ -125,10 +116,6 @@ class AppProvider extends ChangeNotifier {
     _fakeBrowser = await _storage.loadFakeBrowser();
     _fingerprintSeedMode = await _storage.loadFingerprintSeedMode();
     _discordWebhookUrl = await _storage.loadDiscordWebhookUrl();
-    _automationEngine = await _storage.loadAutomationEngine();
-    _exitantyPort = await _storage.loadExitantyPort();
-    _exitantyToken = await _storage.loadExitantyToken();
-    _exitantyHost = await _storage.loadExitantyHost();
     _incognitoMode = await _storage.loadIncognitoMode();
     _shortcut5gEnabled = await _storage.loadShortcut5gEnabled();
     _blockImages = await _storage.loadBlockImages();
@@ -289,30 +276,6 @@ class AppProvider extends ChangeNotifier {
   Future<void> setFakeBrowser(bool v) async {
     _fakeBrowser = v;
     await _storage.saveFakeBrowser(v);
-    notifyListeners();
-  }
-
-  Future<void> setAutomationEngine(String engine) async {
-    _automationEngine = engine;
-    await _storage.saveAutomationEngine(engine);
-    notifyListeners();
-  }
-
-  Future<void> setExitantyPort(int port) async {
-    _exitantyPort = port.clamp(1024, 65535);
-    await _storage.saveExitantyPort(_exitantyPort);
-    notifyListeners();
-  }
-
-  Future<void> setExitantyToken(String token) async {
-    _exitantyToken = token;
-    await _storage.saveExitantyToken(token);
-    notifyListeners();
-  }
-
-  Future<void> setExitantyHost(String host) async {
-    _exitantyHost = host.trim().isEmpty ? '127.0.0.1' : host.trim();
-    await _storage.saveExitantyHost(_exitantyHost);
     notifyListeners();
   }
 

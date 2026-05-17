@@ -36,10 +36,6 @@ class StorageService {
   static const _lotteryApplyKeywordsKey = 'lotteryApplyKeywords';
   static const _fingerprintSeedModeKey = 'fingerprintSeedMode';
   static const _discordWebhookUrlKey = 'discordWebhookUrl';
-  static const _automationEngineKey = 'automationEngine';
-  static const _exitantyPortKey = 'exitantyPort';
-  static const _exitantyTokenKey = 'exitantyToken';
-  static const _exitantyHostKey = 'exitantyHost';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -257,46 +253,6 @@ class StorageService {
   Future<void> saveDiscordWebhookUrl(String url) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_discordWebhookUrlKey, url);
-  }
-
-  Future<String> loadAutomationEngine() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_automationEngineKey) ?? 'webview';
-  }
-
-  Future<void> saveAutomationEngine(String engine) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_automationEngineKey, engine);
-  }
-
-  Future<int> loadExitantyPort() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_exitantyPortKey) ?? 9519;
-  }
-
-  Future<void> saveExitantyPort(int port) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_exitantyPortKey, port);
-  }
-
-  Future<String> loadExitantyToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_exitantyTokenKey) ?? '';
-  }
-
-  Future<void> saveExitantyToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_exitantyTokenKey, token);
-  }
-
-  Future<String> loadExitantyHost() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_exitantyHostKey) ?? '127.0.0.1';
-  }
-
-  Future<void> saveExitantyHost(String host) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_exitantyHostKey, host);
   }
 
   Future<bool> loadFingerprintSeedMode() async {

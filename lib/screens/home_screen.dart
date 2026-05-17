@@ -14,7 +14,6 @@ import '../widgets/account_card.dart';
 import '../widgets/summary_card.dart';
 import 'add_account_screen.dart';
 import 'browser_screen.dart';
-import 'exitanty_browser_screen.dart';
 import 'standalone_browser_screen.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -256,34 +255,6 @@ class _HomeScreenState extends State<HomeScreen>
       // trực tiếp khi chưa có session sẽ bị Access Denied. Đi qua login trước
       // tạo session cookie + referer hợp lệ.
       final String startUrl = p.loginUrl;
-
-      if (p.useExitanty) {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ExitAntyBrowserScreen(
-              account: account,
-              startUrl: startUrl,
-              isRunningAll: _runningAll,
-              accountIndex: index,
-              totalAccounts: total,
-              onStopAll: _runningAll
-                  ? () {
-                      setState(() => _stopAllRequested = true);
-                      Navigator.pop(context);
-                    }
-                  : null,
-              onSkipCurrent: _runningAll
-                  ? () {
-                      setState(() => _stopCurrentRequested = true);
-                      Navigator.pop(context);
-                    }
-                  : null,
-            ),
-          ),
-        );
-        return;
-      }
 
       final proxy = p.proxyEnabled
           ? p.getProxyById(account.proxyId) ?? p.nextProxy
@@ -697,9 +668,6 @@ class _HomeScreenState extends State<HomeScreen>
   void _showSettingsMenu(BuildContext ctx, AppProvider p) {
     final pwCtrl = TextEditingController(text: p.defaultPassword);
     final discordCtrl = TextEditingController(text: p.discordWebhookUrl);
-    final exitantyHostCtrl = TextEditingController(text: p.exitantyHost);
-    final exitantyPortCtrl = TextEditingController(text: p.exitantyPort.toString());
-    final exitantyTokenCtrl = TextEditingController(text: p.exitantyToken);
     showModalBottomSheet(
       context: ctx,
       backgroundColor: AppColors.surfaceVariant,
@@ -989,96 +957,6 @@ class _HomeScreenState extends State<HomeScreen>
                 onChanged: (v) => prov.setDiscordWebhookUrl(v.trim()),
               ),
               const SizedBox(height: 16),
-              const Divider(height: 1),
-              const SizedBox(height: 12),
-              // ── Automation engine ──
-              Row(
-                children: [
-                  const Icon(Icons.smart_toy_outlined, color: AppColors.accent, size: 18),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Automation Engine',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                  SegmentedButton<String>(
-                    style: SegmentedButton.styleFrom(
-                      selectedBackgroundColor: AppColors.secondary,
-                      selectedForegroundColor: Colors.white,
-                      foregroundColor: AppColors.textSecondary,
-                      textStyle: const TextStyle(fontSize: 12),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                    ),
-                    segments: const [
-                      ButtonSegment(value: 'webview', label: Text('WebView')),
-                      ButtonSegment(value: 'exitanty', label: Text('ExitAnty')),
-                    ],
-                    selected: {prov.automationEngine},
-                    onSelectionChanged: (s) => prov.setAutomationEngine(s.first),
-                  ),
-                ],
-              ),
-              if (prov.automationEngine == 'exitanty') ...[
-                const SizedBox(height: 10),
-                // Host + Port row
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 4,
-                      child: TextField(
-                        controller: exitantyHostCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
-                        keyboardType: TextInputType.url,
-                        decoration: const InputDecoration(
-                          labelText: 'Host',
-                          labelStyle: TextStyle(color: AppColors.textSecondary),
-                          hintText: '127.0.0.1',
-                          hintStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                        ),
-                        onChanged: (v) => prov.setExitantyHost(v),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: exitantyPortCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Port',
-                          labelStyle: TextStyle(color: AppColors.textSecondary),
-                          hintText: '9519',
-                          hintStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                        ),
-                        onChanged: (v) {
-                          final port = int.tryParse(v.trim());
-                          if (port != null) prov.setExitantyPort(port);
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: exitantyTokenCtrl,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                  decoration: const InputDecoration(
-                    labelText: 'Token (nếu có)',
-                    labelStyle: TextStyle(color: AppColors.textSecondary),
-                    hintText: 'Bearer token...',
-                    hintStyle: TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                  ),
-                  onChanged: (v) => prov.setExitantyToken(v.trim()),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Mở ExitAnty trước → vào Settings → chọn ExitAnty. '
-                  'Nếu dùng từ máy Mac qua Wi-Fi, nhập IP của iPhone vào Host.',
-                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                ),
-              ],
               const SizedBox(height: 8),
               TextField(
                 controller: pwCtrl,
