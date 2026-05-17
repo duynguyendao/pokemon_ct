@@ -5,6 +5,9 @@ on:
     branches: [ master, main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
@@ -30,11 +33,10 @@ jobs:
         run: |
           BASE=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
           BUILD=${{ github.run_number }}
-          VERSION="${BASE}+${BUILD}"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "base=${BASE}" >> $GITHUB_OUTPUT
           echo "build=${BUILD}" >> $GITHUB_OUTPUT
-          echo "Building version: ${VERSION}"
+          echo "tag=v${BASE}-b${BUILD}" >> $GITHUB_OUTPUT
+          echo "ipa=PokemonCT_v${BASE}_b${BUILD}.ipa" >> $GITHUB_OUTPUT
 
       - name: Build iOS App (Unsigned)
         env:
@@ -42,31 +44,30 @@ jobs:
         run: |
           flutter build ios --release --no-codesign \
             --build-name=${{ steps.version.outputs.base }} \
-            --build-number=${{ steps.version.outputs.build }} \
-            --verbose
+            --build-number=${{ steps.version.outputs.build }}
 
-      - name: Create IPA (Unsigned)
+      - name: Create IPA
         run: |
-          IPA_NAME="PokemonCT_v${{ steps.version.outputs.base }}_b${{ steps.version.outputs.build }}.ipa"
-          echo "IPA_NAME=${IPA_NAME}" >> $GITHUB_ENV
           rm -rf Payload
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          ditto -c -k --keepParent Payload "${IPA_NAME}"
+          ditto -c -k --keepParent Payload "${{ steps.version.outputs.ipa }}"
 
-      - name: Upload IPA artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PokemonCT_v${{ steps.version.outputs.base }}_b${{ steps.version.outputs.build }}
-          path: ${{ env.IPA_NAME }}
+          name: ${{ steps.version.outputs.tag }}
+          path: ${{ steps.version.outputs.ipa }}
           retention-days: 30
 
-      - name: Upload to Feather
-        if: ${{ secrets.FEATHER_API_KEY != '' }}
-        run: |
-          curl -s -X POST "https://feather.is/api/upload" \
-            -H "Authorization: Bearer ${{ secrets.FEATHER_API_KEY }}" \
-            -F "file=@${IPA_NAME}" \
-            -F "version=${{ steps.version.outputs.version }}" \
-            && echo "Feather upload OK" || echo "Feather upload failed (non-fatal)"
-        continue-on-error: true
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "PokemonCT ${{ steps.version.outputs.base }} (build ${{ steps.version.outputs.build }})"
+          body: |
+            **Cách cài qua Feather:**
+            1. Nhấn vào file `.ipa` bên dưới → Copy link
+            2. Mở Feather trên iPhone → Install from URL → Dán link vào
+          files: ${{ steps.version.outputs.ipa }}
+          make_latest: true
