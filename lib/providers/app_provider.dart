@@ -23,6 +23,7 @@ class AppProvider extends ChangeNotifier {
   bool _proxyEnabled = false;
   bool _fakeBrowser = true;
   bool _fingerprintSeedMode = false;
+  String _discordWebhookUrl = '';
   bool _incognitoMode = false;
   bool _shortcut5gEnabled = true;
   bool _blockImages = false;
@@ -63,6 +64,7 @@ class AppProvider extends ChangeNotifier {
   bool get proxyEnabled => _proxyEnabled;
   bool get fakeBrowser => _fakeBrowser;
   bool get fingerprintSeedMode => _fingerprintSeedMode;
+  String get discordWebhookUrl => _discordWebhookUrl;
   bool get incognitoMode => _incognitoMode;
   bool get shortcut5gEnabled => _shortcut5gEnabled;
   bool get blockImages => _blockImages;
@@ -113,6 +115,7 @@ class AppProvider extends ChangeNotifier {
     _proxyEnabled = await _storage.loadProxyEnabled();
     _fakeBrowser = await _storage.loadFakeBrowser();
     _fingerprintSeedMode = await _storage.loadFingerprintSeedMode();
+    _discordWebhookUrl = await _storage.loadDiscordWebhookUrl();
     _incognitoMode = await _storage.loadIncognitoMode();
     _shortcut5gEnabled = await _storage.loadShortcut5gEnabled();
     _blockImages = await _storage.loadBlockImages();
@@ -279,6 +282,12 @@ class AppProvider extends ChangeNotifier {
   Future<void> setFingerprintSeedMode(bool v) async {
     _fingerprintSeedMode = v;
     await _storage.saveFingerprintSeedMode(v);
+    notifyListeners();
+  }
+
+  Future<void> setDiscordWebhookUrl(String url) async {
+    _discordWebhookUrl = url;
+    await _storage.saveDiscordWebhookUrl(url);
     notifyListeners();
   }
 

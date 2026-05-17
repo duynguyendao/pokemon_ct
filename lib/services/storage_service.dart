@@ -35,6 +35,7 @@ class StorageService {
   static const _lotteryApplyResultsKey = 'lotteryApplyResults';
   static const _lotteryApplyKeywordsKey = 'lotteryApplyKeywords';
   static const _fingerprintSeedModeKey = 'fingerprintSeedMode';
+  static const _discordWebhookUrlKey = 'discordWebhookUrl';
 
   Future<List<Account>> loadAccounts() async {
     final prefs = await SharedPreferences.getInstance();
@@ -243,6 +244,16 @@ class StorageService {
       enabled: true,
     ),
   ];
+
+  Future<String> loadDiscordWebhookUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_discordWebhookUrlKey) ?? '';
+  }
+
+  Future<void> saveDiscordWebhookUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_discordWebhookUrlKey, url);
+  }
 
   Future<bool> loadFingerprintSeedMode() async {
     final prefs = await SharedPreferences.getInstance();

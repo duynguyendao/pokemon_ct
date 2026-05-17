@@ -12,6 +12,7 @@ import '../models/order_status_entry.dart';
 import '../models/shipping_entry.dart';
 import '../models/proxy.dart';
 import '../providers/app_provider.dart';
+import '../services/discord_service.dart';
 import '../services/shortcut_service.dart';
 import '../utils/app_theme.dart';
 import '../utils/device_profiles.dart';
@@ -391,10 +392,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
     dd.style.display = 'block';
   }
   var radio = matched.li.querySelector('.mailForm input[type="radio"]');
+  var imgEl = matched.li.querySelector('.waresUl img, .lBox img, .thumb img, img');
+  var imgUrl = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || imgEl.getAttribute('data-lazy') || '') : '';
   postMsg({
     type:'lotteryApply', step:'expand', ok:true,
     title: matched.name, lotteryId: lotteryId,
-    hasRadio: !!radio
+    hasRadio: !!radio, imgUrl: imgUrl
   });
 })();
 ''';
@@ -1925,6 +1928,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
       final matchedTitle = expandResult['title'] as String? ?? kwLabel;
       final lotteryId = expandResult['lotteryId'] as String? ?? '';
+      final imgUrl = expandResult['imgUrl'] as String? ?? '';
       _setStatus('📋 [${ki+1}/${keywords.length}] $matchedTitle — tick form...');
 
       await Future.delayed(Duration(milliseconds: 1200 + (DateTime.now().millisecond % 500)));
@@ -1981,6 +1985,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
         accountEmail: email, productTitle: matchedTitle,
         time: _nowStr(), status: finalStatus));
       _setStatus(finalMsg);
+
+      if (finalStatus == '応募成功' && provider.discordWebhookUrl.isNotEmpty) {
+        unawaited(DiscordService.sendLotterySuccess(
+          webhookUrl: provider.discordWebhookUrl,
+          email: email,
+          productTitle: matchedTitle,
+          imageUrl: imgUrl.isNotEmpty ? imgUrl : null,
+        ));
+      }
     }
 
     await _finishApply();

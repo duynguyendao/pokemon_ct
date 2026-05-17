@@ -7,6 +7,7 @@ import '../models/account.dart';
 import '../models/result_snapshot.dart';
 import '../models/start_all_report.dart';
 import '../providers/app_provider.dart';
+import '../services/discord_service.dart';
 import '../services/shortcut_service.dart';
 import '../utils/app_theme.dart';
 import '../widgets/account_card.dart';
@@ -666,6 +667,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _showSettingsMenu(BuildContext ctx, AppProvider p) {
     final pwCtrl = TextEditingController(text: p.defaultPassword);
+    final discordCtrl = TextEditingController(text: p.discordWebhookUrl);
     showModalBottomSheet(
       context: ctx,
       backgroundColor: AppColors.surfaceVariant,
@@ -900,6 +902,45 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   );
                 },
+              ),
+              const SizedBox(height: 8),
+              const SizedBox(height: 12),
+              TextField(
+                controller: discordCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'Discord Webhook URL',
+                  labelStyle: const TextStyle(color: AppColors.textSecondary),
+                  hintText: 'https://discord.com/api/webhooks/...',
+                  hintStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (discordCtrl.text.isNotEmpty)
+                        IconButton(
+                          icon: const Icon(Icons.send, color: AppColors.secondary, size: 18),
+                          tooltip: 'Test thử',
+                          onPressed: () async {
+                            await DiscordService.sendLotterySuccess(
+                              webhookUrl: discordCtrl.text.trim(),
+                              email: 'test@example.com',
+                              productTitle: 'Test sản phẩm — PokemonCT',
+                            );
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                                content: Text('Đã gửi test notification'),
+                                duration: Duration(seconds: 2),
+                              ));
+                            }
+                          },
+                        ),
+                      const Icon(Icons.notifications_active_outlined,
+                          color: AppColors.textSecondary),
+                      const SizedBox(width: 8),
+                    ],
+                  ),
+                ),
+                onChanged: (v) => prov.setDiscordWebhookUrl(v.trim()),
               ),
               const SizedBox(height: 8),
               TextField(
